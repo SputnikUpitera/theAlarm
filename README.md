@@ -1,3 +1,5 @@
+Скачайте только CURSORTrayApp.exe, если вам не нужен исходный код
+
 # CURSOR Tray App (Alarm + Process Control)
 
 ## Русская версия
