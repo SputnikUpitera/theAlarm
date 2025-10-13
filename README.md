@@ -10,13 +10,13 @@
 Из Developer PowerShell или CMD:
 
 ```bash
-cd CURSORTrayApp
+cd TheAlarm
 dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true
 ```
 
 Исполняемый файл будет создан по пути:
 ```
-CURSORTrayApp\bin\Release\net8.0-windows\win-x64\publish\CURSORTrayApp.exe
+TheAlarm\bin\Release\net8.0-windows\win-x64\publish\TheAlarm.exe
 ```
 
 ### Использование
@@ -63,13 +63,13 @@ CURSORTrayApp\bin\Release\net8.0-windows\win-x64\publish\CURSORTrayApp.exe
 From Developer PowerShell or CMD:
 
 ```bash
-cd CURSORTrayApp
+cd TheAlarm
 dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true
 ```
 
 The executable will be generated at:
 ```
-CURSORTrayApp\bin\Release\net8.0-windows\win-x64\publish\CURSORTrayApp.exe
+TheAlarm\bin\Release\net8.0-windows\win-x64\publish\TheAlarm.exe
 ```
 
 ### Usage

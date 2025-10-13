@@ -9,7 +9,7 @@ using System.Text.Json;
 using System.Windows.Forms;
 using Microsoft.Win32;
 
-namespace CURSORTrayApp
+namespace TheAlarm
 {
 	// Главный контекст приложения, управляющий системным треем и всеми формами
 	public class TrayAppContext : ApplicationContext
@@ -365,28 +365,22 @@ namespace CURSORTrayApp
 		// Переключение отображения окна настроек (по горячим клавишам)
 		private void ToggleSettings(GlobalHotkeyWindow.ToggleKind kind)
 		{
-			if (kind == GlobalHotkeyWindow.ToggleKind.Open)
+			// Просто переключаем между окном будильника и настроек
+			if (_settingsForm.Visible)
 			{
-				if (_settingsForm.Visible)
-				{
-					// Если настройки открыты - скрываем их
-					_settingsForm.Hide();
-					_mode = AppMode.HiddenNoWindow;
-				}
-				else
-				{
-					// Если настройки скрыты - показываем их и скрываем будильник
-					_alarmForm.Hide();
-					_settingsForm.Show();
-					_settingsForm.Activate();
-					_mode = AppMode.HiddenWithSettings;
-				}
-			}
-			else if (kind == GlobalHotkeyWindow.ToggleKind.Close)
-			{
-				// Закрытие настроек
+				// Если настройки открыты - показываем будильник
 				_settingsForm.Hide();
-				_mode = AppMode.HiddenNoWindow;
+				_alarmForm.Show();
+				_alarmForm.Activate();
+				_mode = AppMode.VisibleAlarm;
+			}
+			else
+			{
+				// Если будильник открыт - показываем настройки
+				_alarmForm.Hide();
+				_settingsForm.Show();
+				_settingsForm.Activate();
+				_mode = AppMode.HiddenWithSettings;
 			}
 		}
 

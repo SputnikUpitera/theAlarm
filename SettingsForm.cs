@@ -6,7 +6,7 @@ using System.Linq;
 using System.Windows.Forms;
 using Microsoft.Win32;
 
-namespace CURSORTrayApp
+namespace TheAlarm
 {
 	// Форма настроек приложения (скрытое окно для управления процессами)
 	public class SettingsForm : Form
@@ -372,7 +372,7 @@ namespace CURSORTrayApp
 		{
 			// Получаем путь к текущему exe
 			string exePath = Process.GetCurrentProcess().MainModule?.FileName 
-				?? System.IO.Path.Combine(AppContext.BaseDirectory, "CURSORTrayApp.exe");
+				?? System.IO.Path.Combine(AppContext.BaseDirectory, "TheAlarm.exe");
 
 			// Запускаем reg.exe с правами администратора для добавления в автозапуск
 			var psi = new ProcessStartInfo
@@ -432,7 +432,7 @@ namespace CURSORTrayApp
 			{
 				// Получаем путь к исполняемому файлу для автозапуска
 				string exePath = System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName 
-					?? System.IO.Path.Combine(AppContext.BaseDirectory, "CURSORTrayApp.exe");
+					?? System.IO.Path.Combine(AppContext.BaseDirectory, "TheAlarm.exe");
 				key.SetValue("TheAlarm", $"\"{exePath}\"");
 			}
 			else

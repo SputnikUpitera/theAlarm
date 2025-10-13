@@ -3,7 +3,7 @@ using System.Drawing;
 using System.Windows.Forms;
 using System.Collections.Generic;
 
-namespace CURSORTrayApp
+namespace TheAlarm
 {
 	// Форма для управления будильниками
 	public partial class AlarmForm : Form

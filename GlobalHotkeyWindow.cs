@@ -2,7 +2,7 @@ using System;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
-namespace CURSORTrayApp
+namespace TheAlarm
 {
 	public sealed class GlobalHotkeyWindow : NativeWindow, IDisposable
 	{
@@ -15,9 +15,7 @@ namespace CURSORTrayApp
 		{
 			CreateHandle(new CreateParams());
 			_openId = GetHashCode() ^ 0xA11;
-			_closeId = GetHashCode() ^ 0xB22;
 			RegisterHotKey(Handle, _openId, MOD_CONTROL | MOD_ALT, Keys.F1.GetHashCode());
-			RegisterHotKey(Handle, _closeId, MOD_CONTROL | MOD_ALT, Keys.F2.GetHashCode());
 		}
 
 		protected override void WndProc(ref Message m)
@@ -32,13 +30,6 @@ namespace CURSORTrayApp
 						ToggleRequested?.Invoke(ToggleKind.Open);
 					}
 				}
-				else if (id == _closeId)
-				{
-					if (CanToggleEvaluator == null || CanToggleEvaluator())
-					{
-						ToggleRequested?.Invoke(ToggleKind.Close);
-					}
-				}
 			}
 			base.WndProc(ref m);
 		}
@@ -46,11 +37,10 @@ namespace CURSORTrayApp
 		public void Dispose()
 		{
 			UnregisterHotKey(Handle, _openId);
-			UnregisterHotKey(Handle, _closeId);
 			DestroyHandle();
 		}
 
-		public enum ToggleKind { Open, Close }
+		public enum ToggleKind { Open }
 
 		private const int WM_HOTKEY = 0x0312;
 		private const int MOD_ALT = 0x0001;

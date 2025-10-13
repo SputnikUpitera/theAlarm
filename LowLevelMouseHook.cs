@@ -1,7 +1,7 @@
 using System;
 using System.Runtime.InteropServices;
 
-namespace CURSORTrayApp
+namespace TheAlarm
 {
 	public sealed class LowLevelMouseHook : IDisposable
 	{

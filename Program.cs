@@ -1,7 +1,7 @@
 using System;
 using System.Windows.Forms;
 
-namespace CURSORTrayApp
+namespace TheAlarm
 {
 	// Главный класс приложения - точка входа
 	internal static class Program
