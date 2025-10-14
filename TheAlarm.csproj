@@ -17,8 +17,8 @@
     <PublishTrimmed>false</PublishTrimmed>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <AssemblyName>TheAlarm</AssemblyName>
   </PropertyGroup>
-
 </Project>
 
 

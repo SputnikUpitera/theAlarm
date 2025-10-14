@@ -1,20 +1,30 @@
-Скачайте только theAlarm.exe, если вам не нужен исходный код
-
-# theAlarm - приложение для быстрого и тихого сворачивания/закрытия определённых процессов, замаскированное под будильник(!!!)
+# theAlarm - быстрое закрытие/сворачивание
+## Скачайте только **theAlarm_portable.exe** либо **theAlarm.rar**, если вам не нужен исходный код
 
 ## Русская версия
 
+### Описание
+Данное приложение позволяет мгновенно и без нажатий каких-либо клавиш закрывать либо сворачивать
+определённые, выбранные вами, приложения. А во избежание лишних вопросов оно замаскированно под будильник!
+
+Лёгким движением руки вы подводите курсор в верхний правый угол экрана - выбранные процессы закрываются
+А если в нижний правый - сворачиваются
+
 ### Требования
 - Windows 10 или новее
-- .NET SDK 8.0 (или новее) для сборки
+- .NET SDK 8.0 (или новее) для сборки малообъёмного приложения
 
-### Сборка (единый исполняемый файл)
-Из Developer PowerShell или CMD:
-
+### Сборка (framework-dependent)
 ```bash
-cd TheAlarm
-dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true
+dotnet build -c Release -p:AssemblyName=TheAlarm
 ```
+**Размер**: ~150KB; **Требования**: .NET 8.0 Runtime должен быть установлен на целевой машине
+
+### Сборка (self-contained - portable)
+```bash
+dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -p:AssemblyName=TheAlarm
+```
+**Размер**: ~70MB; **Требования**: не требует установленного .NET
 
 Исполняемый файл будет создан по пути:
 ```
@@ -59,15 +69,21 @@ TheAlarm\bin\Release\net8.0-windows\win-x64\publish\TheAlarm.exe
 
 ### Requirements
 - Windows 10 or later
-- .NET SDK 8.0 (or later) for building
+- .NET SDK 8.0 (or later) for building lightweight application
 
-### Build (single-file executable)
+### Build (framework-dependent)
 From Developer PowerShell or CMD:
 
 ```bash
-cd TheAlarm
-dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true
+dotnet build -c Release -p:AssemblyName=TheAlarm
 ```
+**Size**: ~150KB; **Requirements**: .NET 8.0 Runtime must be installed on target machine
+
+### Build (self-contained - portable)
+```bash
+dotnet publish -c Release
+```
+**Size**: ~70MB; **Requirements**: no .NET installation required
 
 The executable will be generated at:
 ```
