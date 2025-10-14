@@ -290,7 +290,14 @@ namespace TheAlarm
 						if (action == ProcessAction.Close)
 						{
 							// Быстрое принудительное закрытие процесса
-							TryTaskKill(normalized);
+							if (procConfig.ProtectChildren)
+							{
+								TryTaskKillNoChildren(normalized);
+							}
+							else
+							{
+								TryTaskKill(normalized);
+							}
 						}
 						else if (action == ProcessAction.Minimize)
 						{
@@ -315,6 +322,25 @@ namespace TheAlarm
 			try
 			{
 				var psi = new ProcessStartInfo("taskkill", $"/IM {processBaseName}.exe /F /T")
+				{
+					CreateNoWindow = true,
+					UseShellExecute = false,
+					WindowStyle = ProcessWindowStyle.Hidden,
+					RedirectStandardOutput = true,
+					RedirectStandardError = true
+				};
+				using var proc = Process.Start(psi);
+				proc?.WaitForExit(3000);
+			}
+			catch { }
+		}
+
+		// Принудительное закрытие процесса через taskkill без закрытия дочерних процессов
+		private static void TryTaskKillNoChildren(string processBaseName)
+		{
+			try
+			{
+				var psi = new ProcessStartInfo("taskkill", $"/IM {processBaseName}.exe /F")
 				{
 					CreateNoWindow = true,
 					UseShellExecute = false,
