@@ -29,6 +29,8 @@ namespace TheAlarm
 		private readonly CheckBox _autostartCheckbox;
 		// Кнопка для принудительного включения автозапуска (с правами администратора)
 		private readonly Button _forceAutostartButton;
+		// Кнопка «Применить» — сохранить конфиг без закрытия формы
+		private readonly Button _applyButton;
 		// Флаг для предотвращения рекурсивных вызовов при изменении автозапуска
 		private bool _isUpdatingAutostart = false;
 		
@@ -171,6 +173,25 @@ namespace TheAlarm
 			FlatStyle = FlatStyle.Flat
 		};
 		_removeMinimizeButton.FlatAppearance.BorderColor = DarkBorder;
+
+		// Кнопка «Применить» — сохранить конфиг в файл и применить во время работы
+		_applyButton = new Button
+		{
+			Text = "Apply",
+			Left = margin * 2 + listWidth * 2 + 10,
+			Top = margin * 3 + labelHeight + listHeight + 30,
+			Width = 70,
+			Height = 24,
+			BackColor = AccentBlue,
+			ForeColor = Color.White,
+			FlatStyle = FlatStyle.Flat
+		};
+		_applyButton.FlatAppearance.BorderColor = AccentBlue;
+		_applyButton.Click += (_, __) =>
+		{
+			OnConfigurationChanged();
+			MessageBox.Show("Настройки применены и сохранены.", "The Alarm", MessageBoxButtons.OK, MessageBoxIcon.Information);
+		};
 
 		// Чекбокс автозапуска с Windows
 		_autostartCheckbox = new CheckBox
@@ -337,6 +358,7 @@ namespace TheAlarm
 		Controls.Add(_addToMinimizeButton);
 		Controls.Add(_removeCloseButton);
 		Controls.Add(_removeMinimizeButton);
+		Controls.Add(_applyButton);
 		Controls.Add(_autostartCheckbox);
 		Controls.Add(_forceAutostartButton);
 		Controls.Add(cursorCoordsLabel);
@@ -537,6 +559,7 @@ namespace TheAlarm
 				_addToMinimizeButton.Dispose();
 				_removeCloseButton.Dispose();
 				_removeMinimizeButton.Dispose();
+				_applyButton.Dispose();
 				_autostartCheckbox.Dispose();
 				_forceAutostartButton.Dispose();
 			}
