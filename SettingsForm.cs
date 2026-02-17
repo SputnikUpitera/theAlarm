@@ -50,7 +50,7 @@ namespace TheAlarm
 		FormBorderStyle = FormBorderStyle.FixedDialog;
 		StartPosition = FormStartPosition.CenterScreen;
 		Width = 600;
-		Height = 490;
+		Height = 550;
 			
 			// Применение темной темы к форме
 			BackColor = DarkBackground;
@@ -61,6 +61,8 @@ namespace TheAlarm
 		const int listWidth = 240;
 		const int listHeight = 220;
 		const int labelHeight = 35;
+		// Горизонтальное смещение, чтобы центрировать две колонки по ширине формы
+		int horizontalMargin = (Width - (listWidth * 2 + margin)) / 2;
 
 		// Метка для списка закрытия
 		var closeLabel = new Label
@@ -149,7 +151,7 @@ namespace TheAlarm
 		};
 		_addToMinimizeButton.FlatAppearance.BorderColor = DarkBorder;
 		
-		// Кнопки удаления выбранных элементов
+		// Кнопки удаления выбранных элементов (Закрыть)
 		_removeCloseButton = new Button 
 		{ 
 			Text = "Remove Selected (Close)", 
@@ -162,6 +164,7 @@ namespace TheAlarm
 		};
 		_removeCloseButton.FlatAppearance.BorderColor = DarkBorder;
 		
+		// Кнопки удаления выбранных элементов (Свернуть)
 		_removeMinimizeButton = new Button 
 		{ 
 			Text = "Remove Selected (Min)", 
@@ -178,10 +181,11 @@ namespace TheAlarm
 		_applyButton = new Button
 		{
 			Text = "Apply",
-			Left = margin * 2 + listWidth * 2 + 10,
-			Top = margin * 3 + labelHeight + listHeight + 30,
-			Width = 70,
-			Height = 24,
+			// Центрируем по форме и добавляем нормальный вертикальный отступ от блока Remove
+			Left = (Width - 120) / 2,
+			Top = margin * 3 + labelHeight + listHeight + 70,
+			Width = 120,
+			Height = 26,
 			BackColor = AccentBlue,
 			ForeColor = Color.White,
 			FlatStyle = FlatStyle.Flat
@@ -198,7 +202,7 @@ namespace TheAlarm
 		{
 			Text = "Start with Windows",
 			Left = margin,
-			Top = margin * 4 + labelHeight + listHeight + 65,
+			Top = margin * 4 + labelHeight + listHeight + 100,
 			Width = 200,
 			AutoSize = true,
 			ForeColor = LightText
@@ -212,8 +216,8 @@ namespace TheAlarm
 		_forceAutostartButton = new Button
 		{
 			Text = "Enable Autostart (Admin)",
-			Left = margin + 210,
-			Top = margin * 4 + labelHeight + listHeight + 63,
+			Left = margin + 200,
+			Top = margin * 4 + labelHeight + listHeight + 100,
 			Width = 180,
 			Height = 24,
 			BackColor = AccentBlue,
@@ -227,7 +231,7 @@ namespace TheAlarm
 		var cursorCoordsLabel = new Label 
 		{ 
 			Left = margin, 
-			Top = margin * 5 + labelHeight + listHeight + 95, 
+			Top = margin * 5 + labelHeight + listHeight + 130, 
 			Width = 240, 
 			Height = 20, 
 			Text = "(x,y)",
@@ -238,7 +242,7 @@ namespace TheAlarm
 		{ 
 			Text = "Kill Selected (Close)", 
 			Left = margin + 250, 
-			Top = margin * 5 + labelHeight + listHeight + 91, 
+			Top = margin * 5 + labelHeight + listHeight + 130, 
 			Width = 110,
 			BackColor = DarkControl,
 			ForeColor = LightText,
@@ -250,8 +254,8 @@ namespace TheAlarm
 		{ 
 			Text = "Minimize Selected", 
 			Left = margin + 370, 
-			Top = margin * 5 + labelHeight + listHeight + 91, 
-			Width = Width - margin - 370 - margin,  // Отступ до правого края
+			Top = margin * 5 + labelHeight + listHeight + 130, 
+			Width = Width - margin - 400 - margin,  // Отступ до правого края
 			BackColor = DarkControl,
 			ForeColor = LightText,
 			FlatStyle = FlatStyle.Flat
