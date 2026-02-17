@@ -31,6 +31,9 @@ namespace TheAlarm
 		private readonly Button _forceAutostartButton;
 		// Флаг для предотвращения рекурсивных вызовов при изменении автозапуска
 		private bool _isUpdatingAutostart = false;
+		
+		// Событие для уведомления об изменении конфигурации
+		public event EventHandler? ConfigurationChanged;
 
 		// Цвета темной темы (как в Cursor)
 		private static readonly Color DarkBackground = Color.FromArgb(30, 30, 30);
@@ -283,6 +286,7 @@ namespace TheAlarm
 				if (!string.IsNullOrEmpty(name) && !_closeList.Items.Contains(name))
 				{
 					_closeList.Items.Add(name);
+					OnConfigurationChanged(); // Уведомляем об изменении
 				}
 			};
 			
@@ -293,6 +297,7 @@ namespace TheAlarm
 				if (!string.IsNullOrEmpty(name) && !_minimizeList.Items.Contains(name))
 				{
 					_minimizeList.Items.Add(name);
+					OnConfigurationChanged(); // Уведомляем об изменении
 				}
 			};
 			
@@ -300,15 +305,27 @@ namespace TheAlarm
 			_removeCloseButton.Click += (_, __) =>
 			{
 				var toRemove = _closeList.SelectedItem as string;
-				if (toRemove != null) _closeList.Items.Remove(toRemove);
+				if (toRemove != null)
+				{
+					_closeList.Items.Remove(toRemove);
+					OnConfigurationChanged(); // Уведомляем об изменении
+				}
 			};
 			
 			// Обработчик кнопки удаления из списка сворачивания
 			_removeMinimizeButton.Click += (_, __) =>
 			{
 				var toRemove = _minimizeList.SelectedItem as string;
-				if (toRemove != null) _minimizeList.Items.Remove(toRemove);
+				if (toRemove != null)
+				{
+					_minimizeList.Items.Remove(toRemove);
+					OnConfigurationChanged(); // Уведомляем об изменении
+				}
 			};
+			
+			// Обработчик изменения состояния чекбоксов в списках
+			_closeList.ItemCheck += (_, __) => OnConfigurationChanged();
+			_minimizeList.ItemCheck += (_, __) => OnConfigurationChanged();
 
 		// Добавление всех элементов на форму
 		Controls.Add(closeLabel);
@@ -325,6 +342,12 @@ namespace TheAlarm
 		Controls.Add(cursorCoordsLabel);
 		Controls.Add(killSelectedButton);
 		Controls.Add(minimizeSelectedButton);
+	}
+
+	// Метод для вызова события изменения конфигурации
+	private void OnConfigurationChanged()
+	{
+		ConfigurationChanged?.Invoke(this, EventArgs.Empty);
 	}
 
 	// Загрузка конфигурации из сохраненных данных

@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using Microsoft.Win32;
 
@@ -33,6 +34,9 @@ namespace TheAlarm
 
 		// Текущий режим работы приложения
 		private AppMode _mode = AppMode.VisibleAlarm;
+		
+		// Флаг для предотвращения одновременного выполнения действий
+		private bool _isProcessingAction = false;
 
 		public TrayAppContext()
 		{
@@ -50,7 +54,11 @@ namespace TheAlarm
 				if (File.Exists(iconPath))
 				{
 					using var bmp = new Bitmap(iconPath);
-					trayIcon = Icon.FromHandle(bmp.GetHicon());
+					IntPtr hIcon = bmp.GetHicon();
+					trayIcon = Icon.FromHandle(hIcon);
+					// Клонируем иконку, чтобы она не зависела от bitmap
+					trayIcon = (Icon)trayIcon.Clone();
+					DestroyIcon(hIcon); // Освобождаем оригинальный handle
 				}
 				else
 				{
@@ -81,14 +89,17 @@ namespace TheAlarm
 			_alarmForm.RequestPopup += AlarmForm_RequestPopup;
 			_alarmForm.FormClosing += AnyForm_FormClosingToTray;
 			_settingsForm.FormClosing += AnyForm_FormClosingToTray;
+			
+			// Подписка на события изменения списков в настройках
+			_settingsForm.ConfigurationChanged += SettingsForm_ConfigurationChanged;
 
 			// Таймер проверки будильников (каждую секунду)
 			_alarmTimer = new System.Windows.Forms.Timer { Interval = 1000 };
 			_alarmTimer.Tick += AlarmTimer_Tick;
 			_alarmTimer.Start();
 
-			// Резервный таймер проверки углов экрана (каждые 60 мс)
-			_cornerCheckTimer = new System.Windows.Forms.Timer { Interval = 60 };
+			// Резервный таймер проверки углов экрана (каждые 200 мс - реже для оптимизации)
+			_cornerCheckTimer = new System.Windows.Forms.Timer { Interval = 200 };
 			_cornerCheckTimer.Tick += CornerCheckTimer_Tick;
 			_cornerCheckTimer.Start();
 
@@ -145,9 +156,11 @@ namespace TheAlarm
 					}
 				}
 				
-				// Преобразуем в иконку
+				// Преобразуем в иконку и клонируем для безопасности
 				IntPtr hIcon = bmp.GetHicon();
 				Icon icon = Icon.FromHandle(hIcon);
+				Icon clonedIcon = (Icon)icon.Clone();
+				DestroyIcon(hIcon); // Освобождаем оригинальный handle
 				
 				// Сохраняем иконку в файл app.ico для использования в проекте
 				try
@@ -155,12 +168,12 @@ namespace TheAlarm
 					string iconPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "app.ico");
 					using (var fs = new FileStream(iconPath, FileMode.Create))
 					{
-						icon.Save(fs);
+						clonedIcon.Save(fs);
 					}
 				}
 				catch { }
 				
-				return icon;
+				return clonedIcon;
 			}
 			catch
 			{
@@ -223,8 +236,19 @@ namespace TheAlarm
 		private void CornerCheckTimer_Tick(object? sender, EventArgs e)
 		{
 			// Резервный метод на случай, если хук мыши не работает
-			GetCursorPos(out POINT p);
-			CheckCornersAndAct(p.X, p.Y);
+			// Выполняем только если хук активен (оптимизация)
+			if (_mouseHook != null)
+			{
+				GetCursorPos(out POINT p);
+				CheckCornersAndAct(p.X, p.Y);
+			}
+		}
+
+		// Обработчик изменения конфигурации в настройках
+		private void SettingsForm_ConfigurationChanged(object? sender, EventArgs e)
+		{
+			// Сохраняем конфигурацию при каждом изменении
+			SaveApplicationsList();
 		}
 
 		// Обработчик движения мыши (основной метод отслеживания)
@@ -274,84 +298,140 @@ namespace TheAlarm
 			if ((nowUtc - _lastCornerActionUtc).TotalMilliseconds < 250)
 				return;
 			_lastCornerActionUtc = nowUtc;
+			
+			// Защита от одновременного выполнения
+			if (_isProcessingAction)
+				return;
+			_isProcessingAction = true;
 
-			// Получаем список процессов для данного действия
-			var targets = _settingsForm.GetProcessConfigsForAction(action);
-			foreach (var procConfig in targets)
+			// Выполняем асинхронно, чтобы не блокировать UI
+			Task.Run(() =>
 			{
-				var normalized = NormalizeProcessName(procConfig.Name);
-				if (string.IsNullOrWhiteSpace(normalized)) continue;
-				
-				// Находим все запущенные процессы с таким именем
-				foreach (var p in Process.GetProcessesByName(normalized))
+				try
 				{
-					try
+					// Получаем список процессов для данного действия
+					var targets = _settingsForm.GetProcessConfigsForAction(action);
+					if (targets.Count == 0)
 					{
-						if (action == ProcessAction.Close)
+						_isProcessingAction = false;
+						return;
+					}
+
+					// Собираем все уникальные имена процессов для оптимизации
+					var processNames = targets.Select(t => NormalizeProcessName(t.Name))
+						.Where(n => !string.IsNullOrWhiteSpace(n))
+						.Distinct()
+						.ToList();
+
+					// Обрабатываем все процессы асинхронно
+					foreach (var processName in processNames)
+					{
+						Process[] processes = null;
+						try
 						{
-							// Быстрое принудительное закрытие процесса
-							if (procConfig.ProtectChildren)
-							{
-								TryTaskKillNoChildren(normalized);
-							}
-							else
-							{
-								TryTaskKill(normalized);
-							}
+							processes = Process.GetProcessesByName(processName);
 						}
-						else if (action == ProcessAction.Minimize)
+						catch { }
+
+						if (processes == null || processes.Length == 0)
+							continue;
+
+						// Находим конфигурацию для этого процесса
+						var procConfig = targets.FirstOrDefault(t => 
+							NormalizeProcessName(t.Name).Equals(processName, StringComparison.OrdinalIgnoreCase));
+
+						foreach (var p in processes)
 						{
-							// Сворачивание всех окон процесса (кроме служебных)
-							EnumThreadWindowsForProcess(p, (hWnd) =>
+							try
 							{
-								if (!ShouldAffectWindow(hWnd)) return true;
-								SendMessage(hWnd, WM_SYSCOMMAND, (IntPtr)SC_MINIMIZE, IntPtr.Zero);
-								ShowWindow(hWnd, SW_FORCEMINIMIZE);
-								return true;
-							});
+								if (action == ProcessAction.Close)
+								{
+									// Быстрое принудительное закрытие процесса (асинхронно)
+									if (procConfig?.ProtectChildren == true)
+									{
+										TryTaskKillNoChildrenAsync(processName);
+									}
+									else
+									{
+										TryTaskKillAsync(processName);
+									}
+								}
+								else if (action == ProcessAction.Minimize)
+								{
+									// Сворачивание всех окон процесса (кроме служебных)
+									EnumThreadWindowsForProcess(p, (hWnd) =>
+									{
+										if (!ShouldAffectWindow(hWnd)) return true;
+										SendMessage(hWnd, WM_SYSCOMMAND, (IntPtr)SC_MINIMIZE, IntPtr.Zero);
+										ShowWindow(hWnd, SW_FORCEMINIMIZE);
+										return true;
+									});
+								}
+							}
+							catch (Exception) { }
+							finally
+							{
+								// Освобождаем ресурсы процесса
+								try { p.Dispose(); } catch { }
+							}
 						}
 					}
-					catch (Exception) { }
 				}
-			}
+				finally
+				{
+					_isProcessingAction = false;
+				}
+			});
 		}
 
-		// Принудительное закрытие процесса через taskkill
-		private static void TryTaskKill(string processBaseName)
+		// Принудительное закрытие процесса через taskkill (асинхронно, без блокировки)
+		private static void TryTaskKillAsync(string processBaseName)
 		{
-			try
+			Task.Run(() =>
 			{
-				var psi = new ProcessStartInfo("taskkill", $"/IM {processBaseName}.exe /F /T")
+				try
 				{
-					CreateNoWindow = true,
-					UseShellExecute = false,
-					WindowStyle = ProcessWindowStyle.Hidden,
-					RedirectStandardOutput = true,
-					RedirectStandardError = true
-				};
-				using var proc = Process.Start(psi);
-				proc?.WaitForExit(3000);
-			}
-			catch { }
+					var psi = new ProcessStartInfo("taskkill", $"/IM {processBaseName}.exe /F /T")
+					{
+						CreateNoWindow = true,
+						UseShellExecute = false,
+						WindowStyle = ProcessWindowStyle.Hidden,
+						RedirectStandardOutput = true,
+						RedirectStandardError = true
+					};
+					using var proc = Process.Start(psi);
+					if (proc != null)
+					{
+						proc.WaitForExit(1000); // Уменьшено до 1 секунды для быстрого закрытия
+					}
+				}
+				catch { }
+			});
 		}
 
-		// Принудительное закрытие процесса через taskkill без закрытия дочерних процессов
-		private static void TryTaskKillNoChildren(string processBaseName)
+		// Принудительное закрытие процесса через taskkill без закрытия дочерних процессов (асинхронно)
+		private static void TryTaskKillNoChildrenAsync(string processBaseName)
 		{
-			try
+			Task.Run(() =>
 			{
-				var psi = new ProcessStartInfo("taskkill", $"/IM {processBaseName}.exe /F")
+				try
 				{
-					CreateNoWindow = true,
-					UseShellExecute = false,
-					WindowStyle = ProcessWindowStyle.Hidden,
-					RedirectStandardOutput = true,
-					RedirectStandardError = true
-				};
-				using var proc = Process.Start(psi);
-				proc?.WaitForExit(3000);
-			}
-			catch { }
+					var psi = new ProcessStartInfo("taskkill", $"/IM {processBaseName}.exe /F")
+					{
+						CreateNoWindow = true,
+						UseShellExecute = false,
+						WindowStyle = ProcessWindowStyle.Hidden,
+						RedirectStandardOutput = true,
+						RedirectStandardError = true
+					};
+					using var proc = Process.Start(psi);
+					if (proc != null)
+					{
+						proc.WaitForExit(1000); // Уменьшено до 1 секунды
+					}
+				}
+				catch { }
+			});
 		}
 
 		// Нормализация имени процесса (удаление расширения и извлечение имени файла)
@@ -374,17 +454,31 @@ namespace TheAlarm
 		// Перечисление всех окон процесса
 		private static void EnumThreadWindowsForProcess(Process process, Func<IntPtr, bool> onWindow)
 		{
-			foreach (ProcessThread thread in process.Threads)
+			ProcessThread[] threads = null;
+			try
 			{
-				EnumThreadWindows((uint)thread.Id, (hWnd, lParam) =>
+				threads = process.Threads.Cast<ProcessThread>().ToArray();
+			}
+			catch
+			{
+				return;
+			}
+
+			foreach (ProcessThread thread in threads)
+			{
+				try
 				{
-					// Обрабатываем только видимые окна верхнего уровня
-					if (IsWindowVisible(hWnd))
+					EnumThreadWindows((uint)thread.Id, (hWnd, lParam) =>
 					{
-						return onWindow(hWnd);
-					}
-					return true;
-				}, IntPtr.Zero);
+						// Обрабатываем только видимые окна верхнего уровня
+						if (IsWindowVisible(hWnd))
+						{
+							return onWindow(hWnd);
+						}
+						return true;
+					}, IntPtr.Zero);
+				}
+				catch { }
 			}
 		}
 
@@ -548,6 +642,9 @@ namespace TheAlarm
 
 		[DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
 		private static extern int GetClassName(IntPtr hWnd, System.Text.StringBuilder lpClassName, int nMaxCount);
+
+		[DllImport("user32.dll")]
+		private static extern bool DestroyIcon(IntPtr hIcon);
 
 		// Проверка, нужно ли влиять на данное окно (исключаем служебные окна IME)
 		private static bool ShouldAffectWindow(IntPtr hWnd)
