@@ -33,6 +33,10 @@ namespace TheAlarm
 		private readonly Button _applyButton;
 		// Флаг для предотвращения рекурсивных вызовов при изменении автозапуска
 		private bool _isUpdatingAutostart = false;
+		// Флаг для подавления событий при программной загрузке конфигурации
+		private bool _isLoadingConfiguration = false;
+		private const string AutostartRegistryPath = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Run";
+		private const string AutostartValueName = "TheAlarm";
 		
 		// Событие для уведомления об изменении конфигурации
 		public event EventHandler? ConfigurationChanged;
@@ -345,9 +349,10 @@ namespace TheAlarm
 				}
 			};
 			
-			// Обработчик изменения состояния чекбоксов в списках
-			_closeList.ItemCheck += (_, __) => OnConfigurationChanged();
-			_minimizeList.ItemCheck += (_, __) => OnConfigurationChanged();
+			// CheckedListBox обновляет состояние элемента после ItemCheck,
+			// поэтому откладываем сохранение до следующего сообщения UI.
+			_closeList.ItemCheck += ProcessList_ItemCheck;
+			_minimizeList.ItemCheck += ProcessList_ItemCheck;
 
 		// Добавление всех элементов на форму
 		Controls.Add(closeLabel);
@@ -373,20 +378,46 @@ namespace TheAlarm
 		ConfigurationChanged?.Invoke(this, EventArgs.Empty);
 	}
 
+	private void ProcessList_ItemCheck(object? sender, ItemCheckEventArgs e)
+	{
+		if (_isLoadingConfiguration)
+			return;
+
+		if (!IsHandleCreated || IsDisposed)
+		{
+			OnConfigurationChanged();
+			return;
+		}
+
+		BeginInvoke(new Action(() =>
+		{
+			if (!_isLoadingConfiguration && !IsDisposed)
+				OnConfigurationChanged();
+		}));
+	}
+
 	// Загрузка конфигурации из сохраненных данных
 	public void LoadConfiguration(List<TrayAppContext.ProcessConfig> closeProcesses, List<TrayAppContext.ProcessConfig> minimizeProcesses)
 	{
-		_closeList.Items.Clear();
-		_minimizeList.Items.Clear();
-		foreach (var proc in closeProcesses)
+		_isLoadingConfiguration = true;
+		try
 		{
-			int idx = _closeList.Items.Add(proc.Name);
-			_closeList.SetItemChecked(idx, proc.ProtectChildren);
+			_closeList.Items.Clear();
+			_minimizeList.Items.Clear();
+			foreach (var proc in closeProcesses)
+			{
+				int idx = _closeList.Items.Add(proc.Name);
+				_closeList.SetItemChecked(idx, proc.ProtectChildren);
+			}
+			foreach (var proc in minimizeProcesses)
+			{
+				int idx = _minimizeList.Items.Add(proc.Name);
+				_minimizeList.SetItemChecked(idx, proc.ProtectChildren);
+			}
 		}
-		foreach (var proc in minimizeProcesses)
+		finally
 		{
-			int idx = _minimizeList.Items.Add(proc.Name);
-			_minimizeList.SetItemChecked(idx, proc.ProtectChildren);
+			_isLoadingConfiguration = false;
 		}
 	}
 
@@ -416,22 +447,25 @@ namespace TheAlarm
 	{
 		try
 		{
-			// Получаем путь к текущему exe
-			string exePath = Process.GetCurrentProcess().MainModule?.FileName 
-				?? System.IO.Path.Combine(AppContext.BaseDirectory, "TheAlarm.exe");
+			string exePath = GetCurrentExecutablePath();
 
 			// Запускаем reg.exe с правами администратора для добавления в автозапуск
 			var psi = new ProcessStartInfo
 			{
 				FileName = "reg",
-				Arguments = $"add \"HKCU\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run\" /v \"TheAlarm\" /t REG_SZ /d \"\\\"{exePath}\\\"\" /f",
+				Arguments = $"add \"HKCU\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run\" /v \"{AutostartValueName}\" /t REG_SZ /d \"\\\"{exePath}\\\"\" /f",
 				UseShellExecute = true,
 				Verb = "runas", // Запрос прав администратора
 				WindowStyle = ProcessWindowStyle.Hidden
 			};
 
 			var process = Process.Start(psi);
-			process?.WaitForExit();
+			if (process == null)
+				throw new InvalidOperationException("Не удалось запустить reg.exe.");
+
+			process.WaitForExit();
+			if (process.ExitCode != 0 || !IsAutostartEnabled())
+				throw new InvalidOperationException("Запись автозапуска не была подтверждена.");
 
 			// Обновляем состояние чекбокса без вызова события
 			_isUpdatingAutostart = true;
@@ -457,8 +491,8 @@ namespace TheAlarm
 		{
 			try
 			{
-				using var key = Registry.CurrentUser.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", false);
-				return key?.GetValue("TheAlarm") != null;
+				var currentValue = GetAutostartRegistryValue();
+				return string.Equals(currentValue, GetAutostartCommand(), StringComparison.OrdinalIgnoreCase);
 			}
 			catch
 			{
@@ -471,19 +505,16 @@ namespace TheAlarm
 	{
 		try
 		{
-			using var key = Registry.CurrentUser.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", true);
+			using var key = Registry.CurrentUser.OpenSubKey(AutostartRegistryPath, true);
 			if (key == null) return false;
 
 			if (enabled)
 			{
-				// Получаем путь к исполняемому файлу для автозапуска
-				string exePath = System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName 
-					?? System.IO.Path.Combine(AppContext.BaseDirectory, "TheAlarm.exe");
-				key.SetValue("TheAlarm", $"\"{exePath}\"");
+				key.SetValue(AutostartValueName, GetAutostartCommand());
 			}
 			else
 			{
-				key.DeleteValue("TheAlarm", false);
+				key.DeleteValue(AutostartValueName, false);
 			}
 			return true;
 		}
@@ -491,6 +522,23 @@ namespace TheAlarm
 		{
 			return false;
 		}
+	}
+
+	private static string GetCurrentExecutablePath()
+	{
+		return Process.GetCurrentProcess().MainModule?.FileName
+			?? System.IO.Path.Combine(AppContext.BaseDirectory, "TheAlarm.exe");
+	}
+
+	private static string GetAutostartCommand()
+	{
+		return $"\"{GetCurrentExecutablePath()}\"";
+	}
+
+	private static string? GetAutostartRegistryValue()
+	{
+		using var key = Registry.CurrentUser.OpenSubKey(AutostartRegistryPath, false);
+		return key?.GetValue(AutostartValueName) as string;
 	}
 
 	// Получение списка процессов для указанного действия (устаревший метод для обратной совместимости)

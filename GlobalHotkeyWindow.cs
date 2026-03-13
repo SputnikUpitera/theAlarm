@@ -25,10 +25,7 @@ namespace TheAlarm
 				int id = m.WParam.ToInt32();
 				if (id == _openId)
 				{
-					if (CanToggleEvaluator == null || CanToggleEvaluator())
-					{
-						ToggleRequested?.Invoke(ToggleKind.Open);
-					}
+					ToggleRequested?.Invoke(ToggleKind.Open);
 				}
 			}
 			base.WndProc(ref m);

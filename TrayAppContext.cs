@@ -109,7 +109,7 @@ namespace TheAlarm
 
 			// Регистрация глобальных горячих клавиш (Ctrl+Alt+F1)
 			_hotkeyWindow = new GlobalHotkeyWindow();
-			_hotkeyWindow.CanToggleEvaluator = () => _alarmForm.Visible || _settingsForm.Visible;
+			_hotkeyWindow.CanToggleEvaluator = () => true;
 			_hotkeyWindow.ToggleRequested += ToggleSettings;
 		}
 
@@ -208,10 +208,24 @@ namespace TheAlarm
 		// Показать окно будильника
 		private void ShowAlarm()
 		{
+			_settingsForm.Hide();
 			_mode = AppMode.VisibleAlarm;
 			_alarmForm.ShowInTaskbar = true;
+			_alarmForm.WindowState = FormWindowState.Normal;
 			_alarmForm.Show();
+			_alarmForm.BringToFront();
 			_alarmForm.Activate();
+		}
+
+		private void ShowSettings()
+		{
+			_alarmForm.Hide();
+			_mode = AppMode.HiddenWithSettings;
+			_settingsForm.ShowInTaskbar = true;
+			_settingsForm.WindowState = FormWindowState.Normal;
+			_settingsForm.Show();
+			_settingsForm.BringToFront();
+			_settingsForm.Activate();
 		}
 
 		// Обработчик запроса на показ всплывающего окна
@@ -326,7 +340,7 @@ namespace TheAlarm
 					// Обрабатываем все процессы асинхронно
 					foreach (var processName in processNames)
 					{
-						Process[] processes = null;
+						Process[] processes = Array.Empty<Process>();
 						try
 						{
 							processes = Process.GetProcessesByName(processName);
@@ -340,32 +354,36 @@ namespace TheAlarm
 						var procConfig = targets.FirstOrDefault(t => 
 							NormalizeProcessName(t.Name).Equals(processName, StringComparison.OrdinalIgnoreCase));
 
+						if (action == ProcessAction.Close)
+						{
+							try
+							{
+								// taskkill работает по имени процесса, поэтому достаточно одного вызова.
+								if (procConfig?.ProtectChildren == true)
+								{
+									TryTaskKillNoChildrenAsync(processName);
+								}
+								else
+								{
+									TryTaskKillAsync(processName);
+								}
+							}
+							catch (Exception) { }
+							continue;
+						}
+
 						foreach (var p in processes)
 						{
 							try
 							{
-								if (action == ProcessAction.Close)
+								// Если дочерние процессы не защищены, сворачиваем все окно-дерево.
+								var processIdsToMinimize = procConfig?.ProtectChildren == true
+									? new HashSet<int> { p.Id }
+									: GetProcessIdsWithDescendants(p.Id);
+
+								foreach (var processId in processIdsToMinimize)
 								{
-									// Быстрое принудительное закрытие процесса (асинхронно)
-									if (procConfig?.ProtectChildren == true)
-									{
-										TryTaskKillNoChildrenAsync(processName);
-									}
-									else
-									{
-										TryTaskKillAsync(processName);
-									}
-								}
-								else if (action == ProcessAction.Minimize)
-								{
-									// Сворачивание всех окон процесса (кроме служебных)
-									EnumThreadWindowsForProcess(p, (hWnd) =>
-									{
-										if (!ShouldAffectWindow(hWnd)) return true;
-										SendMessage(hWnd, WM_SYSCOMMAND, (IntPtr)SC_MINIMIZE, IntPtr.Zero);
-										ShowWindow(hWnd, SW_FORCEMINIMIZE);
-										return true;
-									});
+									TryMinimizeProcessWindows(processId);
 								}
 							}
 							catch (Exception) { }
@@ -454,7 +472,7 @@ namespace TheAlarm
 		// Перечисление всех окон процесса
 		private static void EnumThreadWindowsForProcess(Process process, Func<IntPtr, bool> onWindow)
 		{
-			ProcessThread[] threads = null;
+			ProcessThread[] threads = Array.Empty<ProcessThread>();
 			try
 			{
 				threads = process.Threads.Cast<ProcessThread>().ToArray();
@@ -482,25 +500,88 @@ namespace TheAlarm
 			}
 		}
 
+		private static void TryMinimizeProcessWindows(int processId)
+		{
+			try
+			{
+				using var process = Process.GetProcessById(processId);
+				EnumThreadWindowsForProcess(process, (hWnd) =>
+				{
+					if (!ShouldAffectWindow(hWnd)) return true;
+					SendMessage(hWnd, WM_SYSCOMMAND, (IntPtr)SC_MINIMIZE, IntPtr.Zero);
+					ShowWindow(hWnd, SW_FORCEMINIMIZE);
+					return true;
+				});
+			}
+			catch { }
+		}
+
+		private static HashSet<int> GetProcessIdsWithDescendants(int rootProcessId)
+		{
+			var result = new HashSet<int> { rootProcessId };
+			var childrenByParent = BuildChildProcessLookup();
+			var queue = new Queue<int>();
+			queue.Enqueue(rootProcessId);
+
+			while (queue.Count > 0)
+			{
+				int parentId = queue.Dequeue();
+				if (!childrenByParent.TryGetValue(parentId, out var childIds))
+					continue;
+
+				foreach (var childId in childIds)
+				{
+					if (result.Add(childId))
+						queue.Enqueue(childId);
+				}
+			}
+
+			return result;
+		}
+
+		private static Dictionary<int, List<int>> BuildChildProcessLookup()
+		{
+			var childrenByParent = new Dictionary<int, List<int>>();
+			IntPtr snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+			if (snapshot == INVALID_HANDLE_VALUE)
+				return childrenByParent;
+
+			try
+			{
+				var entry = new PROCESSENTRY32 { dwSize = (uint)Marshal.SizeOf<PROCESSENTRY32>() };
+				if (!Process32First(snapshot, ref entry))
+					return childrenByParent;
+
+				do
+				{
+					if (!childrenByParent.TryGetValue((int)entry.th32ParentProcessID, out var children))
+					{
+						children = new List<int>();
+						childrenByParent[(int)entry.th32ParentProcessID] = children;
+					}
+
+					children.Add((int)entry.th32ProcessID);
+				}
+				while (Process32Next(snapshot, ref entry));
+			}
+			finally
+			{
+				CloseHandle(snapshot);
+			}
+
+			return childrenByParent;
+		}
+
 		// Переключение отображения окна настроек (по горячим клавишам)
 		private void ToggleSettings(GlobalHotkeyWindow.ToggleKind kind)
 		{
-			// Просто переключаем между окном будильника и настроек
 			if (_settingsForm.Visible)
 			{
-				// Если настройки открыты - показываем будильник
-				_settingsForm.Hide();
-				_alarmForm.Show();
-				_alarmForm.Activate();
-				_mode = AppMode.VisibleAlarm;
+				ShowAlarm();
 			}
 			else
 			{
-				// Если будильник открыт - показываем настройки
-				_alarmForm.Hide();
-				_settingsForm.Show();
-				_settingsForm.Activate();
-				_mode = AppMode.HiddenWithSettings;
+				ShowSettings();
 			}
 		}
 
@@ -509,7 +590,11 @@ namespace TheAlarm
 		{
 			e.Cancel = true;
 			(sender as Form)?.Hide();
-			_mode = AppMode.VisibleAlarm;
+			_mode = _settingsForm.Visible
+				? AppMode.HiddenWithSettings
+				: _alarmForm.Visible
+					? AppMode.VisibleAlarm
+					: AppMode.HiddenNoWindow;
 		}
 
 		// Выход из приложения
@@ -614,7 +699,39 @@ namespace TheAlarm
 		[DllImport("user32.dll")]
 		private static extern bool IsWindowVisible(IntPtr hWnd);
 
+		[DllImport("kernel32.dll", SetLastError = true)]
+		private static extern IntPtr CreateToolhelp32Snapshot(uint dwFlags, uint th32ProcessID);
+
+		[DllImport("kernel32.dll", SetLastError = true)]
+		private static extern bool Process32First(IntPtr hSnapshot, ref PROCESSENTRY32 lppe);
+
+		[DllImport("kernel32.dll", SetLastError = true)]
+		private static extern bool Process32Next(IntPtr hSnapshot, ref PROCESSENTRY32 lppe);
+
+		[DllImport("kernel32.dll", SetLastError = true)]
+		private static extern bool CloseHandle(IntPtr hObject);
+
 		private delegate bool EnumThreadDelegate(IntPtr hWnd, IntPtr lParam);
+
+		private const uint TH32CS_SNAPPROCESS = 0x00000002;
+		private static readonly IntPtr INVALID_HANDLE_VALUE = new IntPtr(-1);
+
+		[StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
+		private struct PROCESSENTRY32
+		{
+			public uint dwSize;
+			public uint cntUsage;
+			public uint th32ProcessID;
+			public IntPtr th32DefaultHeapID;
+			public uint th32ModuleID;
+			public uint cntThreads;
+			public uint th32ParentProcessID;
+			public int pcPriClassBase;
+			public uint dwFlags;
+
+			[MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)]
+			public string szExeFile;
+		}
 
 		[DllImport("user32.dll")]
 		private static extern int GetSystemMetrics(int nIndex);
