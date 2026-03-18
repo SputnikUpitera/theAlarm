@@ -53,24 +53,39 @@ namespace TheAlarm
 		Text = "The Alarm - Settings";
 		FormBorderStyle = FormBorderStyle.FixedDialog;
 		StartPosition = FormStartPosition.CenterScreen;
-		Width = 600;
-		Height = 530;
+		ClientSize = new Size(560, 500);
+		MaximizeBox = false;
+		MinimizeBox = false;
 			
 			// Применение темной темы к форме
 			BackColor = DarkBackground;
 			ForeColor = LightText;
 
 		// Константы для расположения элементов
-		const int margin = 15;
-		const int listWidth = 240;
+		const int margin = 16;
+		const int rowGap = 10;
+		const int buttonHeight = 28;
 		const int listHeight = 220;
 		const int labelHeight = 35;
+		int contentWidth = ClientSize.Width - margin * 2;
+		int listWidth = (contentWidth - margin) / 2;
+		int leftColumnX = margin;
+		int rightColumnX = leftColumnX + listWidth + margin;
+		int inputRowTop = margin * 2 + labelHeight + listHeight;
+		int addButtonTop = inputRowTop + buttonHeight + rowGap;
+		int removeButtonTop = addButtonTop + buttonHeight + rowGap;
+		int applyButtonTop = removeButtonTop + buttonHeight + rowGap + 6;
+		int optionsRowTop = applyButtonTop + buttonHeight + rowGap + 8;
+		int debugRowTop = optionsRowTop + buttonHeight + rowGap + 8;
+		int addButtonWidth = (listWidth - rowGap) / 2;
+		int bottomActionWidth = 140;
+		int debugLabelWidth = contentWidth - bottomActionWidth * 2 - rowGap * 2;
 
 		// Метка для списка закрытия
 		var closeLabel = new Label
 		{
 			Text = "Close Processes\n(Check = Protect Child Processes)",
-			Left = margin,
+			Left = leftColumnX,
 			Top = margin,
 			Width = listWidth,
 			Height = labelHeight,
@@ -81,7 +96,7 @@ namespace TheAlarm
 		// Список процессов для закрытия (левая колонка) с флажками защиты дочерних процессов
 		_closeList = new CheckedListBox 
 		{ 
-			Left = margin, 
+			Left = leftColumnX, 
 			Top = margin + labelHeight, 
 			Width = listWidth, 
 			Height = listHeight,
@@ -95,7 +110,7 @@ namespace TheAlarm
 		var minimizeLabel = new Label
 		{
 			Text = "Minimize Processes\n(Check = Protect Child Processes)",
-			Left = margin * 2 + listWidth,
+			Left = rightColumnX,
 			Top = margin,
 			Width = listWidth,
 			Height = labelHeight,
@@ -106,7 +121,7 @@ namespace TheAlarm
 		// Список процессов для сворачивания (правая колонка) с флажками защиты дочерних процессов
 		_minimizeList = new CheckedListBox 
 		{ 
-			Left = margin * 2 + listWidth, 
+			Left = rightColumnX, 
 			Top = margin + labelHeight, 
 			Width = listWidth, 
 			Height = listHeight,
@@ -119,34 +134,37 @@ namespace TheAlarm
 		// Поле ввода имени процесса
 		_addProcessBox = new TextBox 
 		{ 
-			Left = margin, 
-			Top = margin * 2 + labelHeight + listHeight, 
-			Width = 180,
+			Left = leftColumnX, 
+			Top = inputRowTop, 
+			Width = contentWidth,
+			Height = buttonHeight,
 			BackColor = DarkControl,
 			ForeColor = LightText,
 			BorderStyle = BorderStyle.FixedSingle
 		};
 		
-		// Кнопка "Add to Close" - рядом с полем ввода
+		// Кнопки добавления выровнены в две одинаковые колонки
 		_addToCloseButton = new Button 
 		{ 
 			Text = "Add to Close", 
-			Left = margin + 190, 
-			Top = margin * 2 + labelHeight + listHeight, 
-			Width = 110,
+			Left = leftColumnX, 
+			Top = addButtonTop, 
+			Width = addButtonWidth,
+			Height = buttonHeight,
 			BackColor = DarkControl,
 			ForeColor = LightText,
 			FlatStyle = FlatStyle.Flat
 		};
 		_addToCloseButton.FlatAppearance.BorderColor = DarkBorder;
 		
-		// Кнопка "Add to Minimize" - перемещена вправо, чтобы не пересекалась с "Add to Close"
+		// Правая кнопка добавления зеркалит левую
 		_addToMinimizeButton = new Button 
 		{ 
 			Text = "Add to Minimize", 
-			Left = margin + 310, 
-			Top = margin * 2 + labelHeight + listHeight, 
-			Width = 130,
+			Left = leftColumnX + addButtonWidth + rowGap, 
+			Top = addButtonTop, 
+			Width = addButtonWidth,
+			Height = buttonHeight,
 			BackColor = DarkControl,
 			ForeColor = LightText,
 			FlatStyle = FlatStyle.Flat
@@ -157,9 +175,10 @@ namespace TheAlarm
 		_removeCloseButton = new Button 
 		{ 
 			Text = "Remove Selected (Close)", 
-			Left = margin, 
-			Top = margin * 3 + labelHeight + listHeight + 25, 
+			Left = leftColumnX, 
+			Top = removeButtonTop, 
 			Width = listWidth,
+			Height = buttonHeight,
 			BackColor = DarkControl,
 			ForeColor = LightText,
 			FlatStyle = FlatStyle.Flat
@@ -170,9 +189,10 @@ namespace TheAlarm
 		_removeMinimizeButton = new Button 
 		{ 
 			Text = "Remove Selected (Min)", 
-			Left = margin * 2 + listWidth, 
-			Top = margin * 3 + labelHeight + listHeight + 25, 
+			Left = rightColumnX, 
+			Top = removeButtonTop, 
 			Width = listWidth,
+			Height = buttonHeight,
 			BackColor = DarkControl,
 			ForeColor = LightText,
 			FlatStyle = FlatStyle.Flat
@@ -183,10 +203,10 @@ namespace TheAlarm
 		_applyButton = new Button
 		{
 			Text = "Apply",
-			Left = (Width - 120) / 2 - 40,
-			Top = margin * 3 + labelHeight + listHeight + 65,
+			Left = (ClientSize.Width - 120) / 2,
+			Top = applyButtonTop,
 			Width = 120,
-			Height = 26,
+			Height = buttonHeight,
 			BackColor = AccentBlue,
 			ForeColor = Color.White,
 			FlatStyle = FlatStyle.Flat
@@ -202,8 +222,8 @@ namespace TheAlarm
 		_autostartCheckbox = new CheckBox
 		{
 			Text = "Start with Windows",
-			Left = margin,
-			Top = margin * 4 + labelHeight + listHeight + 95,
+			Left = leftColumnX,
+			Top = optionsRowTop + 4,
 			Width = 200,
 			AutoSize = true,
 			ForeColor = LightText
@@ -217,10 +237,10 @@ namespace TheAlarm
 		_forceAutostartButton = new Button
 		{
 			Text = "Enable Autostart (Admin)",
-			Left = margin + 200,
-			Top = margin * 4 + labelHeight + listHeight + 95,
+			Left = ClientSize.Width - margin - 180,
+			Top = optionsRowTop,
 			Width = 180,
-			Height = 24,
+			Height = buttonHeight,
 			BackColor = AccentBlue,
 			ForeColor = Color.White,
 			FlatStyle = FlatStyle.Flat
@@ -231,9 +251,9 @@ namespace TheAlarm
 		// Отладочные элементы (показ координат курсора и тестовые кнопки)
 		var cursorCoordsLabel = new Label 
 		{ 
-			Left = margin, 
-			Top = margin * 5 + labelHeight + listHeight + 120, 
-			Width = 240, 
+			Left = leftColumnX, 
+			Top = debugRowTop + 4, 
+			Width = debugLabelWidth, 
 			Height = 20, 
 			Text = "(x,y)",
 			ForeColor = LightText
@@ -242,9 +262,10 @@ namespace TheAlarm
 		var killSelectedButton = new Button 
 		{ 
 			Text = "Kill Selected (Close)", 
-			Left = margin + 250, 
-			Top = margin * 5 + labelHeight + listHeight + 120, 
-			Width = 110,
+			Left = leftColumnX + debugLabelWidth + rowGap, 
+			Top = debugRowTop, 
+			Width = bottomActionWidth,
+			Height = buttonHeight,
 			BackColor = DarkControl,
 			ForeColor = LightText,
 			FlatStyle = FlatStyle.Flat
@@ -254,9 +275,10 @@ namespace TheAlarm
 		var minimizeSelectedButton = new Button 
 		{ 
 			Text = "Minimize Selected", 
-			Left = margin + 370, 
-			Top = margin * 5 + labelHeight + listHeight + 120, 
-			Width = Width - margin - 400 - margin,  // Отступ до правого края
+			Left = leftColumnX + debugLabelWidth + rowGap * 2 + bottomActionWidth, 
+			Top = debugRowTop, 
+			Width = bottomActionWidth,
+			Height = buttonHeight,
 			BackColor = DarkControl,
 			ForeColor = LightText,
 			FlatStyle = FlatStyle.Flat
