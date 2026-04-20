@@ -257,7 +257,7 @@
 
 ### Status
 
-`Todo`
+`Done`
 
 ### Цель
 
@@ -265,15 +265,12 @@
 
 ### Подзадачи
 
-1. Спроектировать модель `MacroDefinition`:
-   - `Id`
-   - `IsActive`
-   - `Modifiers`
-   - `Key`
-   - `RunnerType`
-   - `ScriptText`
-   - `CreatedUtc`
-   - `UpdatedUtc`
+1. Использовать существующую storage-модель из `AppState.cs`, а не создавать новую:
+   - `AppState.Macros.Definitions`
+   - `MacroDefinition`
+   - `MacroHotkey`
+   - `MacroRunnerTypes`
+   Если для UI/runtime понадобится расширение payload, делать это как совместимое изменение текущей схемы.
 2. Явно разделить внутренние hotkey окон и пользовательские hotkey макросов:
    - `Ctrl+Alt+F1` остается для текущего скрытого окна настроек;
    - `Ctrl+Alt+F2` открывает отдельное окно макросов;
@@ -310,13 +307,12 @@
 
 ### Рекомендуемые файлы
 
-- новый файл `MacroDefinition.cs`
 - новый файл `HotkeyManager.cs`
 - новый файл `MacroExecutionService.cs`
 - новый файл `MacroForm.cs`
 - [GlobalHotkeyWindow.cs](/W:/Projects/CURSOR/CURSORTrayApp/GlobalHotkeyWindow.cs:7)
 - [TrayAppContext.cs](/W:/Projects/CURSOR/CURSORTrayApp/TrayAppContext.cs:16)
-- `AppState.cs`
+- [AppState.cs](/W:/Projects/CURSOR/CURSORTrayApp/AppState.cs:8)
 
 ### Критерии готовности
 
@@ -332,6 +328,84 @@
 1. Некоторые сочетания Windows не удастся зарегистрировать через стандартный API, даже если продуктово они разрешены.
 2. Запуск с повышенными правами потребует аккуратной реализации и проверки фактического поведения UAC.
 3. Скрытый запуск shell-команд усложняет диагностику ошибок исполнения.
+
+### Agent B Working Notes
+
+- Owner: `Agent B`
+- Scope for current implementation:
+  - перевести runtime с single-hotkey окна на multi-hotkey registration для внутренних окон и пользовательских макросов;
+  - добавить отдельное окно макросов по `Ctrl+Alt+F2` без изменения поведения tray;
+  - хранить и редактировать макросы через существующий `AppState.Macros.Definitions`;
+  - выполнять макросы через скрытый `cmd` или `PowerShell` без внешних `.bat/.cmd/.ps1` файлов;
+  - различать продуктовую валидацию конфликта между пользовательскими макросами и фактический результат регистрации Win32.
+- Refined subtasks:
+  - расширить `GlobalHotkeyWindow` до поддержки набора регистрируемых hotkey и маршрутизации callbacks;
+  - добавить `HotkeyManager` для внутренних hotkey окон и пользовательских macro hotkey;
+  - реализовать `MacroExecutionService` с hidden + runas запуском и test-run из UI;
+  - реализовать `MacroForm` с вертикальным списком карточек, добавлением, удалением, редактированием и отображением ошибок регистрации;
+  - интегрировать загрузку/сохранение macro definitions и refresh hotkey registration в `TrayAppContext`;
+  - при необходимости ограничиться минимальным совместимым расширением `AppState.cs` без sidecar storage.
+- Planned file touches within ownership:
+  - `GlobalHotkeyWindow.cs`
+  - `HotkeyManager.cs`
+  - `MacroExecutionService.cs`
+  - `MacroForm.cs`
+  - `TrayAppContext.cs` (minimal integration only)
+  - `AppState.cs` (only if compatible schema extension is required)
+  - `IMPLEMENTATION_PLAN.md`
+
+### Implementation Result
+
+- Реализовано отдельное окно `MacroForm` по `Ctrl+Alt+F2` с вертикальным scrollable-списком карточек.
+- Каждая карточка содержит:
+  - `Active`
+  - hotkey capture field
+  - runner selector (`cmd` / `PowerShell`)
+  - `Test`
+  - `Delete`
+  - большой многострочный editor для текста макроса
+- Добавлен `HotkeyManager`, который:
+  - держит несколько глобальных hotkey одновременно;
+  - объединяет внутренние `Ctrl+Alt+F1` / `Ctrl+Alt+F2` и пользовательские macro hotkeys в единую registration map;
+  - разрешает тем же сочетаниям быть использованными и для внутренних окон, и для макросов;
+  - запрещает конфликт только между пользовательскими макросами;
+  - отражает фактический Win32 registration failure обратно в статус макроса.
+- `GlobalHotkeyWindow` переписан с single-hotkey на multi-registration окно.
+- Добавлен `MacroExecutionService`:
+  - хранение текста макроса остается внутри общего encrypted `config.dat`;
+  - `.bat/.cmd/.ps1` sidecar-файлы не создаются;
+  - `PowerShell` macro запускается hidden + `runas`;
+  - `cmd` macro запускается через elevated hidden PowerShell bootstrap, который поднимает скрытый `cmd` и передает текст через stdin без внешнего файла.
+- Выполнена интеграция в `TrayAppContext`:
+  - загрузка и сохранение идут через `AppStateRepository`;
+  - макросы читаются и пишутся только через `AppState.Macros.Definitions`;
+  - hotkey registration refresh происходит после изменений макросов;
+  - отдельное legacy `config.json` сохранение в `TrayAppContext` удалено, чтобы macros/process rules/alarms жили в общей state-модели.
+- Фактические file touches Agent B:
+  - `GlobalHotkeyWindow.cs`
+  - `HotkeyManager.cs`
+  - `MacroExecutionService.cs`
+  - `MacroForm.cs`
+  - `TrayAppContext.cs`
+  - `IMPLEMENTATION_PLAN.md`
+- `AppState.cs` не менялся: текущего контракта хватило.
+
+### Remaining Risks / Untested Scenarios
+
+- Статус `Done`: ручная проверка окна макросов, карточек, кнопок добавления и live-scroll подтверждена.
+- Не проверены фактические UAC сценарии:
+  - user cancels `runas`
+  - скрытость окна после elevation
+  - поведение при уже повышенном процессе
+- Не проверены реальные Win32 registration collisions с внешними приложениями, которые уже держат тот же global hotkey.
+- Частично проверен end-to-end сценарий UI и скрытого доступа:
+  - окно макросов открывается только по внутреннему `Ctrl+Alt+F2`;
+  - пункт открытия макросов из tray menu убран;
+  - добавление, удаление, прокрутка и базовое редактирование карточек работают.
+- Не проверен end-to-end сценарий совместного срабатывания:
+  - `Ctrl+Alt+F1` открывает settings
+  - macro с тем же hotkey запускается параллельно
+- Не проверены edge-case команды `cmd`, чувствительные к console encoding или интерактивному вводу.
 
 ## 9. Этап 4. Pomodoro Tracker
 
@@ -445,7 +519,6 @@
 - `AppStateRepository.cs`
 - `EncryptionService.cs`
 - `MigrationService.cs`
-- `MacroDefinition.cs`
 - `HotkeyManager.cs`
 - `MacroExecutionService.cs`
 - `MacroForm.cs`
@@ -484,7 +557,7 @@
 |---|---|---|---|
 | Foundation and storage refactor | Done | Agent A | Shared AppState macro section added; Agent B must reuse this storage contract |
 | Encrypted config and migration | Done | Agent A | Shared encrypted config.dat schema confirmed to carry macro payload in the common container |
-| Macro window and global macro hotkeys | Todo | Unassigned | |
+| Macro window and global macro hotkeys | Done | Agent B | Multi-hotkey runtime, macro window, hidden cmd/PowerShell execution, AppState.Macros integration, add buttons and live-scroll behavior are implemented; core manual UI verification confirmed |
 | Pomodoro tracker | Todo | Unassigned | |
 | Integration and documentation sync | Todo | Unassigned | |
 

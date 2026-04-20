@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
@@ -6,49 +7,81 @@ namespace TheAlarm
 {
 	public sealed class GlobalHotkeyWindow : NativeWindow, IDisposable
 	{
-		private readonly int _openId;
-		private readonly int _closeId;
-		public event Action<ToggleKind>? ToggleRequested;
-		public Func<bool>? CanToggleEvaluator { get; set; }
+		private readonly Dictionary<int, HotkeyGesture> _registrations = new Dictionary<int, HotkeyGesture>();
+		private int _nextRegistrationId = 1;
+		private bool _disposed;
+
+		public event Action<HotkeyGesture>? HotkeyPressed;
 
 		public GlobalHotkeyWindow()
 		{
 			CreateHandle(new CreateParams());
-			_openId = GetHashCode() ^ 0xA11;
-			RegisterHotKey(Handle, _openId, MOD_CONTROL | MOD_ALT, Keys.F1.GetHashCode());
+		}
+
+		public bool TryRegisterHotkey(HotkeyGesture gesture, out int registrationId)
+		{
+			ObjectDisposedException.ThrowIf(_disposed, this);
+
+			registrationId = _nextRegistrationId++;
+			if (!RegisterHotKey(Handle, registrationId, (uint)gesture.ToWin32Modifiers(), (uint)gesture.Key))
+			{
+				registrationId = 0;
+				return false;
+			}
+
+			_registrations[registrationId] = gesture;
+			return true;
+		}
+
+		public void UnregisterAllHotkeys()
+		{
+			foreach (var registrationId in _registrations.Keys)
+			{
+				try
+				{
+					UnregisterHotKey(Handle, registrationId);
+				}
+				catch
+				{
+				}
+			}
+
+			_registrations.Clear();
 		}
 
 		protected override void WndProc(ref Message m)
 		{
 			if (m.Msg == WM_HOTKEY)
 			{
-				int id = m.WParam.ToInt32();
-				if (id == _openId)
+				var registrationId = m.WParam.ToInt32();
+				if (_registrations.TryGetValue(registrationId, out var gesture))
 				{
-					ToggleRequested?.Invoke(ToggleKind.Open);
+					HotkeyPressed?.Invoke(gesture);
 				}
 			}
+
 			base.WndProc(ref m);
 		}
 
 		public void Dispose()
 		{
-			UnregisterHotKey(Handle, _openId);
+			if (_disposed)
+			{
+				return;
+			}
+
+			_disposed = true;
+			UnregisterAllHotkeys();
 			DestroyHandle();
+			GC.SuppressFinalize(this);
 		}
 
-		public enum ToggleKind { Open }
-
 		private const int WM_HOTKEY = 0x0312;
-		private const int MOD_ALT = 0x0001;
-		private const int MOD_CONTROL = 0x0002;
 
-		[DllImport("user32.dll")] private static extern bool RegisterHotKey(IntPtr hWnd, int id, int fsModifiers, int vk);
-		[DllImport("user32.dll")] private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
+		[DllImport("user32.dll", SetLastError = true)]
+		private static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
+
+		[DllImport("user32.dll", SetLastError = true)]
+		private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
 	}
 }
-
-
-
-
-

@@ -5,198 +5,327 @@ using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
-using System.Text.Json;
 using System.Threading.Tasks;
 using System.Windows.Forms;
-using Microsoft.Win32;
 
 namespace TheAlarm
 {
-	// Главный контекст приложения, управляющий системным треем и всеми формами
 	public class TrayAppContext : ApplicationContext
 	{
-		// Иконка в системном трее
 		private readonly NotifyIcon _notifyIcon;
-		// Форма с будильником (основное окно)
 		private readonly AlarmForm _alarmForm;
-		// Форма настроек (скрытое окно)
 		private readonly SettingsForm _settingsForm;
-		// Всплывающее окно с уведомлениями
+		private readonly MacroForm _macroForm;
 		private readonly PopupForm _popupForm;
-		// Таймер для проверки сработавших будильников
 		private readonly System.Windows.Forms.Timer _alarmTimer;
-		// Таймер для проверки углов экрана (резервный)
 		private readonly System.Windows.Forms.Timer _cornerCheckTimer;
-		// Глобальный хук мыши для отслеживания движения курсора
 		private readonly LowLevelMouseHook _mouseHook = new LowLevelMouseHook();
-		// Окно для регистрации глобальных горячих клавиш
 		private readonly GlobalHotkeyWindow _hotkeyWindow;
+		private readonly HotkeyManager _hotkeyManager;
+		private readonly MacroExecutionService _macroExecutionService;
+		private readonly AppStateRepository _stateRepository;
 
-		// Текущий режим работы приложения
-		private AppMode _mode = AppMode.VisibleAlarm;
-		
-		// Флаг для предотвращения одновременного выполнения действий
-		private bool _isProcessingAction = false;
+		private AppState _appState = new AppState();
+		private bool _isLoadingState;
+		private bool _isProcessingAction;
+		private DateTime _lastCornerActionUtc = DateTime.MinValue;
 
 		public TrayAppContext()
 		{
-			// Создание всех форм приложения
+			_macroExecutionService = new MacroExecutionService();
+			_stateRepository = new AppStateRepository();
+
 			_alarmForm = new AlarmForm();
 			_settingsForm = new SettingsForm();
+			_macroForm = new MacroForm(_macroExecutionService);
 			_popupForm = new PopupForm();
 
-			// Загрузка пользовательской иконки из файла icon.jpg или создание стандартной
-			Icon trayIcon = SystemIcons.Application;
-			try
-			{
-				// Пытаемся загрузить icon.jpg из папки с программой
-				string iconPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "icon.jpg");
-				if (File.Exists(iconPath))
-				{
-					using var bmp = new Bitmap(iconPath);
-					IntPtr hIcon = bmp.GetHicon();
-					trayIcon = Icon.FromHandle(hIcon);
-					// Клонируем иконку, чтобы она не зависела от bitmap
-					trayIcon = (Icon)trayIcon.Clone();
-					DestroyIcon(hIcon); // Освобождаем оригинальный handle
-				}
-				else
-				{
-					// Если файл не найден, создаем простую иконку программно
-					trayIcon = CreateDefaultIcon();
-				}
-			}
-			catch 
-			{
-				// В случае ошибки создаем иконку по умолчанию
-				trayIcon = CreateDefaultIcon();
-			}
-
-			// Настройка иконки в системном трее
+			var trayIcon = LoadTrayIcon();
 			_notifyIcon = new NotifyIcon
 			{
 				Text = "The Alarm",
 				Icon = trayIcon,
-				Visible = true
+				Visible = true,
+				ContextMenuStrip = BuildContextMenu()
 			};
 			_notifyIcon.MouseClick += NotifyIcon_MouseClick;
-			_notifyIcon.ContextMenuStrip = BuildContextMenu();
 
-			// Загрузка сохраненного списка приложений
-			LoadApplicationsList();
-
-			// Подписка на события форм
-			_alarmForm.RequestPopup += AlarmForm_RequestPopup;
 			_alarmForm.FormClosing += AnyForm_FormClosingToTray;
 			_settingsForm.FormClosing += AnyForm_FormClosingToTray;
-			
-			// Подписка на события изменения списков в настройках
-			_settingsForm.ConfigurationChanged += SettingsForm_ConfigurationChanged;
+			_macroForm.FormClosing += AnyForm_FormClosingToTray;
 
-			// Таймер проверки будильников (каждую секунду)
+			_alarmForm.AlarmsChanged += (_, __) => SaveState();
+			_settingsForm.ConfigurationChanged += (_, __) => SaveState();
+			_macroForm.MacrosChanged += (_, __) => SaveStateAndRefreshMacroHotkeys();
+
+			LoadState();
+
+			_hotkeyWindow = new GlobalHotkeyWindow();
+			_hotkeyManager = new HotkeyManager(_hotkeyWindow);
+			_hotkeyManager.SetInternalBindings(new[]
+			{
+				new HotkeyActionBinding
+				{
+					Id = "internal-settings-window",
+					Gesture = new HotkeyGesture(HotkeyModifiers.Control | HotkeyModifiers.Alt, Keys.F1),
+					Handler = ToggleSettingsWindow
+				},
+				new HotkeyActionBinding
+				{
+					Id = "internal-macro-window",
+					Gesture = new HotkeyGesture(HotkeyModifiers.Control | HotkeyModifiers.Alt, Keys.F2),
+					Handler = ToggleMacroWindow
+				}
+			});
+			RefreshMacroHotkeys();
+
 			_alarmTimer = new System.Windows.Forms.Timer { Interval = 1000 };
 			_alarmTimer.Tick += AlarmTimer_Tick;
 			_alarmTimer.Start();
 
-			// Резервный таймер проверки углов экрана (каждые 200 мс - реже для оптимизации)
 			_cornerCheckTimer = new System.Windows.Forms.Timer { Interval = 200 };
 			_cornerCheckTimer.Tick += CornerCheckTimer_Tick;
 			_cornerCheckTimer.Start();
 
-			// Запуск глобального хука мыши для отслеживания движения курсора
 			_mouseHook.MouseMove += MouseHook_MouseMove;
 			_mouseHook.Start();
-
-			// Регистрация глобальных горячих клавиш (Ctrl+Alt+F1)
-			_hotkeyWindow = new GlobalHotkeyWindow();
-			_hotkeyWindow.CanToggleEvaluator = () => true;
-			_hotkeyWindow.ToggleRequested += ToggleSettings;
 		}
 
-		// Создание стандартной иконки программно (циферблат часов)
+		public class ProcessConfig
+		{
+			public string Name { get; set; } = string.Empty;
+			public bool ProtectChildren { get; set; }
+		}
+
+		private void LoadState()
+		{
+			_isLoadingState = true;
+			try
+			{
+				var loadResult = _stateRepository.Load();
+				_appState = loadResult.State.Normalize();
+
+				_settingsForm.LoadConfiguration(
+					ToProcessConfigs(_appState.ProcessRules.CloseProcesses),
+					ToProcessConfigs(_appState.ProcessRules.MinimizeProcesses));
+				_alarmForm.LoadAlarms(_appState.Alarms);
+				_macroForm.LoadMacros(_appState.Macros.Definitions);
+
+				if (!string.IsNullOrWhiteSpace(loadResult.WarningMessage))
+				{
+					MessageBox.Show(
+						loadResult.WarningMessage,
+						"The Alarm",
+						MessageBoxButtons.OK,
+						MessageBoxIcon.Warning);
+				}
+			}
+			finally
+			{
+				_isLoadingState = false;
+			}
+		}
+
+		private void SaveState()
+		{
+			if (_isLoadingState)
+			{
+				return;
+			}
+
+			var newState = new AppState
+			{
+				SchemaVersion = AppState.CurrentSchemaVersion,
+				ProcessRules = new ProcessRulesState
+				{
+					CloseProcesses = ToProcessRules(_settingsForm.GetProcessConfigsForAction(ProcessAction.Close)),
+					MinimizeProcesses = ToProcessRules(_settingsForm.GetProcessConfigsForAction(ProcessAction.Minimize))
+				},
+				Alarms = _alarmForm.GetAlarms(),
+				Macros = new MacroState
+				{
+					Definitions = _macroForm.GetMacros()
+				},
+				FutureData = _appState.FutureData
+			}.Normalize();
+
+			if (_stateRepository.Save(newState, out var errorMessage))
+			{
+				_appState = newState;
+				return;
+			}
+
+			MessageBox.Show(
+				errorMessage ?? "Failed to save configuration.",
+				"The Alarm",
+				MessageBoxButtons.OK,
+				MessageBoxIcon.Error);
+		}
+
+		private void SaveStateAndRefreshMacroHotkeys()
+		{
+			RefreshMacroHotkeys();
+			SaveState();
+		}
+
+		private void RefreshMacroHotkeys()
+		{
+			var macros = _macroForm.GetMacros();
+			var statuses = _hotkeyManager.SetMacroBindings(macros.Select(CreateMacroBinding).ToList());
+			_macroForm.SetRegistrationStatuses(statuses);
+		}
+
+		private MacroHotkeyBinding CreateMacroBinding(MacroDefinition definition)
+		{
+			var snapshot = definition.Clone().Normalize();
+			return new MacroHotkeyBinding
+			{
+				MacroId = snapshot.Id,
+				IsActive = snapshot.IsActive,
+				Hotkey = snapshot.Hotkey.Clone(),
+				ScriptText = snapshot.ScriptText,
+				Handler = () => ExecuteMacro(snapshot.Id)
+			};
+		}
+
+		private void ExecuteMacro(string macroId)
+		{
+			var macro = _macroForm
+				.GetMacros()
+				.FirstOrDefault(item => string.Equals(item.Id, macroId, StringComparison.OrdinalIgnoreCase));
+
+			if (macro == null)
+			{
+				AppLog.Error($"Macro '{macroId}' was requested by hotkey but no longer exists.");
+				return;
+			}
+
+			if (!_macroExecutionService.TryExecute(macro, out var errorMessage))
+			{
+				MessageBox.Show(
+					errorMessage ?? "Failed to start macro.",
+					"Macro Execution",
+					MessageBoxButtons.OK,
+					MessageBoxIcon.Warning);
+			}
+		}
+
+		private static List<ProcessConfig> ToProcessConfigs(List<ProcessRule> rules)
+		{
+			var configs = new List<ProcessConfig>();
+			foreach (var rule in rules ?? new List<ProcessRule>())
+			{
+				if (rule == null)
+				{
+					continue;
+				}
+
+				configs.Add(new ProcessConfig
+				{
+					Name = rule.Name,
+					ProtectChildren = rule.ProtectChildren
+				});
+			}
+
+			return configs;
+		}
+
+		private static List<ProcessRule> ToProcessRules(List<ProcessConfig> configs)
+		{
+			var rules = new List<ProcessRule>();
+			foreach (var config in configs ?? new List<ProcessConfig>())
+			{
+				if (config == null)
+				{
+					continue;
+				}
+
+				rules.Add(new ProcessRule
+				{
+					Name = config.Name,
+					ProtectChildren = config.ProtectChildren
+				}.Normalize());
+			}
+
+			return rules;
+		}
+
+		private static Icon LoadTrayIcon()
+		{
+			Icon trayIcon = SystemIcons.Application;
+			try
+			{
+				var iconPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "icon.jpg");
+				if (File.Exists(iconPath))
+				{
+					using var bmp = new Bitmap(iconPath);
+					var hIcon = bmp.GetHicon();
+					trayIcon = (Icon)Icon.FromHandle(hIcon).Clone();
+					DestroyIcon(hIcon);
+				}
+				else
+				{
+					trayIcon = CreateDefaultIcon();
+				}
+			}
+			catch
+			{
+				trayIcon = CreateDefaultIcon();
+			}
+
+			return trayIcon;
+		}
+
 		private static Icon CreateDefaultIcon()
 		{
 			try
 			{
-				// Создаем bitmap 32x32 пикселей для качественной иконки
-				var bmp = new Bitmap(32, 32);
+				using var bmp = new Bitmap(32, 32);
 				using (var g = Graphics.FromImage(bmp))
 				{
 					g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-					
-					// Фон - темно-синий градиент
-					using (var brush = new System.Drawing.Drawing2D.LinearGradientBrush(
+					using var brush = new System.Drawing.Drawing2D.LinearGradientBrush(
 						new Rectangle(0, 0, 32, 32),
 						Color.FromArgb(0, 90, 180),
 						Color.FromArgb(0, 50, 120),
-						45f))
-					{
-						g.FillEllipse(brush, 0, 0, 31, 31);
-					}
-					
-					// Белая рамка циферблата
-					using (var pen = new Pen(Color.White, 2))
-					{
-						g.DrawEllipse(pen, 2, 2, 27, 27);
-					}
-					
-					// Стрелки часов
-					using (var pen = new Pen(Color.White, 2))
-					{
-						// Часовая стрелка (на 10 часов)
-						g.DrawLine(pen, 16, 16, 11, 8);
-						// Минутная стрелка (на 2 часа)
-						g.DrawLine(pen, 16, 16, 23, 10);
-					}
-					
-					// Центральная точка
-					using (var brush = new SolidBrush(Color.White))
-					{
-						g.FillEllipse(brush, 14, 14, 4, 4);
-					}
+						45f);
+					using var pen = new Pen(Color.White, 2);
+					using var centerBrush = new SolidBrush(Color.White);
+
+					g.FillEllipse(brush, 0, 0, 31, 31);
+					g.DrawEllipse(pen, 2, 2, 27, 27);
+					g.DrawLine(pen, 16, 16, 11, 8);
+					g.DrawLine(pen, 16, 16, 23, 10);
+					g.FillEllipse(centerBrush, 14, 14, 4, 4);
 				}
-				
-				// Преобразуем в иконку и клонируем для безопасности
-				IntPtr hIcon = bmp.GetHicon();
-				Icon icon = Icon.FromHandle(hIcon);
-				Icon clonedIcon = (Icon)icon.Clone();
-				DestroyIcon(hIcon); // Освобождаем оригинальный handle
-				
-				// Сохраняем иконку в файл app.ico для использования в проекте
-				try
-				{
-					string iconPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "app.ico");
-					using (var fs = new FileStream(iconPath, FileMode.Create))
-					{
-						clonedIcon.Save(fs);
-					}
-				}
-				catch { }
-				
-				return clonedIcon;
+
+				var hIcon = bmp.GetHicon();
+				var cloned = (Icon)Icon.FromHandle(hIcon).Clone();
+				DestroyIcon(hIcon);
+				return cloned;
 			}
 			catch
 			{
-				// В случае ошибки возвращаем системную иконку
 				return SystemIcons.Application;
 			}
 		}
 
-		// Построение контекстного меню для иконки в трее
 		private ContextMenuStrip BuildContextMenu()
 		{
 			var menu = new ContextMenuStrip();
+
 			var openAlarm = new ToolStripMenuItem("Open The Alarm");
 			openAlarm.Click += (_, __) => ShowAlarm();
+
 			var exit = new ToolStripMenuItem("Exit");
 			exit.Click += (_, __) => ExitApplication();
+
 			menu.Items.Add(openAlarm);
 			menu.Items.Add(new ToolStripSeparator());
 			menu.Items.Add(exit);
 			return menu;
 		}
 
-		// Обработчик клика по иконке в трее
 		private void NotifyIcon_MouseClick(object? sender, MouseEventArgs e)
 		{
 			if (e.Button == MouseButtons.Left)
@@ -205,11 +334,10 @@ namespace TheAlarm
 			}
 		}
 
-		// Показать окно будильника
 		private void ShowAlarm()
 		{
 			_settingsForm.Hide();
-			_mode = AppMode.VisibleAlarm;
+			_macroForm.Hide();
 			_alarmForm.ShowInTaskbar = true;
 			_alarmForm.WindowState = FormWindowState.Normal;
 			_alarmForm.Show();
@@ -217,10 +345,10 @@ namespace TheAlarm
 			_alarmForm.Activate();
 		}
 
-		private void ShowSettings()
+		private void ShowSettingsWindow()
 		{
 			_alarmForm.Hide();
-			_mode = AppMode.HiddenWithSettings;
+			_macroForm.Hide();
 			_settingsForm.ShowInTaskbar = true;
 			_settingsForm.WindowState = FormWindowState.Normal;
 			_settingsForm.Show();
@@ -228,116 +356,120 @@ namespace TheAlarm
 			_settingsForm.Activate();
 		}
 
-		// Обработчик запроса на показ всплывающего окна
-		private void AlarmForm_RequestPopup(object? sender, string message)
+		private void ShowMacroWindow()
 		{
-			_popupForm.SetMessage(message);
-			_popupForm.Show();
-			_popupForm.Activate();
+			_alarmForm.Hide();
+			_settingsForm.Hide();
+			_macroForm.ShowInTaskbar = true;
+			_macroForm.WindowState = FormWindowState.Normal;
+			_macroForm.Show();
+			_macroForm.BringToFront();
+			_macroForm.Activate();
 		}
 
-		// Обработчик таймера для проверки сработавших будильников
+		private void ToggleSettingsWindow()
+		{
+			if (_settingsForm.Visible)
+			{
+				_settingsForm.Hide();
+				return;
+			}
+
+			ShowSettingsWindow();
+		}
+
+		private void ToggleMacroWindow()
+		{
+			if (_macroForm.Visible)
+			{
+				_macroForm.Hide();
+				return;
+			}
+
+			ShowMacroWindow();
+		}
+
 		private void AlarmTimer_Tick(object? sender, EventArgs e)
 		{
 			var due = _alarmForm.ConsumeDueAlarms();
-			foreach (var msg in due)
+			foreach (var message in due)
 			{
-				AlarmForm_RequestPopup(this, msg);
+				_popupForm.SetMessage(message);
+				_popupForm.Show();
+				_popupForm.Activate();
 			}
 		}
 
-		// Обработчик резервного таймера проверки углов экрана
 		private void CornerCheckTimer_Tick(object? sender, EventArgs e)
 		{
-			// Резервный метод на случай, если хук мыши не работает
-			// Выполняем только если хук активен (оптимизация)
-			if (_mouseHook != null)
+			if (_mouseHook == null)
 			{
-				GetCursorPos(out POINT p);
-				CheckCornersAndAct(p.X, p.Y);
+				return;
 			}
+
+			GetCursorPos(out var point);
+			CheckCornersAndAct(point.X, point.Y);
 		}
 
-		// Обработчик изменения конфигурации в настройках
-		private void SettingsForm_ConfigurationChanged(object? sender, EventArgs e)
-		{
-			// Сохраняем конфигурацию при каждом изменении
-			SaveApplicationsList();
-		}
-
-		// Обработчик движения мыши (основной метод отслеживания)
 		private void MouseHook_MouseMove(int x, int y)
 		{
-			// Проверяем углы независимо от режима (работает даже когда окна скрыты!)
 			CheckCornersAndAct(x, y);
 		}
 
-		// Проверка нахождения курсора в углах экрана и выполнение действий
 		private void CheckCornersAndAct(int x, int y)
 		{
-			// Получаем размеры экрана
-			int screenW = GetSystemMetrics(SM_CXSCREEN);
-			int screenH = GetSystemMetrics(SM_CYSCREEN);
-			
-			// Определяем пороги для углов (2 пикселя от края)
-			int marginX = 2;
-			int rightThreshold = screenW - 1 - marginX;
-			int topBand = 1 + marginX;
-			int bottomThreshold = screenH - 1 - marginX;
-			
-			bool rightOfThreshold = x > rightThreshold;
-			
-			// Правый верхний угол - закрыть процессы
+			var screenW = GetSystemMetrics(SM_CXSCREEN);
+			var screenH = GetSystemMetrics(SM_CYSCREEN);
+
+			const int margin = 2;
+			var rightThreshold = screenW - 1 - margin;
+			var topBand = 1 + margin;
+			var bottomThreshold = screenH - 1 - margin;
+			var rightOfThreshold = x > rightThreshold;
+
 			if (rightOfThreshold && y < topBand)
 			{
 				PerformProcessAction(ProcessAction.Close);
 				return;
 			}
-			
-			// Правый нижний угол - свернуть процессы
+
 			if (rightOfThreshold && y > bottomThreshold)
 			{
 				PerformProcessAction(ProcessAction.Minimize);
 			}
 		}
 
-		// Время последнего выполнения действия (для защиты от повторных срабатываний)
-		private DateTime _lastCornerActionUtc = DateTime.MinValue;
-
-		// Выполнение действия над процессами (закрытие или сворачивание)
 		private void PerformProcessAction(ProcessAction action)
 		{
-			// Защита от повторных срабатываний (debounce)
 			var nowUtc = DateTime.UtcNow;
 			if ((nowUtc - _lastCornerActionUtc).TotalMilliseconds < 250)
+			{
 				return;
-			_lastCornerActionUtc = nowUtc;
-			
-			// Защита от одновременного выполнения
-			if (_isProcessingAction)
-				return;
-			_isProcessingAction = true;
+			}
 
-			// Выполняем асинхронно, чтобы не блокировать UI
+			_lastCornerActionUtc = nowUtc;
+			if (_isProcessingAction)
+			{
+				return;
+			}
+
+			_isProcessingAction = true;
 			Task.Run(() =>
 			{
 				try
 				{
-					// Получаем список процессов для данного действия
 					var targets = _settingsForm.GetProcessConfigsForAction(action);
 					if (targets.Count == 0)
 					{
-						_isProcessingAction = false;
 						return;
 					}
 
-					// Собираем все уникальные имена процессов для оптимизации
-					var processNames = targets.Select(t => NormalizeProcessName(t.Name))
-						.Where(n => !string.IsNullOrWhiteSpace(n))
-						.Distinct()
+					var processNames = targets
+						.Select(target => NormalizeProcessName(target.Name))
+						.Where(name => !string.IsNullOrWhiteSpace(name))
+						.Distinct(StringComparer.OrdinalIgnoreCase)
 						.ToList();
 
-					// Обрабатываем все процессы асинхронно
 					foreach (var processName in processNames)
 					{
 						Process[] processes = Array.Empty<Process>();
@@ -345,52 +477,57 @@ namespace TheAlarm
 						{
 							processes = Process.GetProcessesByName(processName);
 						}
-						catch { }
-
-						if (processes == null || processes.Length == 0)
-							continue;
-
-						// Находим конфигурацию для этого процесса
-						var procConfig = targets.FirstOrDefault(t => 
-							NormalizeProcessName(t.Name).Equals(processName, StringComparison.OrdinalIgnoreCase));
-
-						if (action == ProcessAction.Close)
+						catch
 						{
-							try
-							{
-								// taskkill работает по имени процесса, поэтому достаточно одного вызова.
-								if (procConfig?.ProtectChildren == true)
-								{
-									TryTaskKillNoChildrenAsync(processName);
-								}
-								else
-								{
-									TryTaskKillAsync(processName);
-								}
-							}
-							catch (Exception) { }
+						}
+
+						if (processes.Length == 0)
+						{
 							continue;
 						}
 
-						foreach (var p in processes)
+						var processConfig = targets.FirstOrDefault(target =>
+							NormalizeProcessName(target.Name).Equals(processName, StringComparison.OrdinalIgnoreCase));
+
+						if (action == ProcessAction.Close)
+						{
+							if (processConfig?.ProtectChildren == true)
+							{
+								TryTaskKillNoChildrenAsync(processName);
+							}
+							else
+							{
+								TryTaskKillAsync(processName);
+							}
+
+							continue;
+						}
+
+						foreach (var process in processes)
 						{
 							try
 							{
-								// Если дочерние процессы не защищены, сворачиваем все окно-дерево.
-								var processIdsToMinimize = procConfig?.ProtectChildren == true
-									? new HashSet<int> { p.Id }
-									: GetProcessIdsWithDescendants(p.Id);
+								var processIdsToMinimize = processConfig?.ProtectChildren == true
+									? new HashSet<int> { process.Id }
+									: GetProcessIdsWithDescendants(process.Id);
 
 								foreach (var processId in processIdsToMinimize)
 								{
 									TryMinimizeProcessWindows(processId);
 								}
 							}
-							catch (Exception) { }
+							catch
+							{
+							}
 							finally
 							{
-								// Освобождаем ресурсы процесса
-								try { p.Dispose(); } catch { }
+								try
+								{
+									process.Dispose();
+								}
+								catch
+								{
+								}
 							}
 						}
 					}
@@ -402,77 +539,78 @@ namespace TheAlarm
 			});
 		}
 
-		// Принудительное закрытие процесса через taskkill (асинхронно, без блокировки)
 		private static void TryTaskKillAsync(string processBaseName)
 		{
 			Task.Run(() =>
 			{
 				try
 				{
-					var psi = new ProcessStartInfo("taskkill", $"/IM {processBaseName}.exe /F /T")
+					var startInfo = new ProcessStartInfo("taskkill", $"/IM {processBaseName}.exe /F /T")
 					{
 						CreateNoWindow = true,
 						UseShellExecute = false,
 						WindowStyle = ProcessWindowStyle.Hidden,
-						RedirectStandardOutput = true,
-						RedirectStandardError = true
+						RedirectStandardError = true,
+						RedirectStandardOutput = true
 					};
-					using var proc = Process.Start(psi);
-					if (proc != null)
-					{
-						proc.WaitForExit(1000); // Уменьшено до 1 секунды для быстрого закрытия
-					}
+					using var process = Process.Start(startInfo);
+					process?.WaitForExit(1000);
 				}
-				catch { }
+				catch
+				{
+				}
 			});
 		}
 
-		// Принудительное закрытие процесса через taskkill без закрытия дочерних процессов (асинхронно)
 		private static void TryTaskKillNoChildrenAsync(string processBaseName)
 		{
 			Task.Run(() =>
 			{
 				try
 				{
-					var psi = new ProcessStartInfo("taskkill", $"/IM {processBaseName}.exe /F")
+					var startInfo = new ProcessStartInfo("taskkill", $"/IM {processBaseName}.exe /F")
 					{
 						CreateNoWindow = true,
 						UseShellExecute = false,
 						WindowStyle = ProcessWindowStyle.Hidden,
-						RedirectStandardOutput = true,
-						RedirectStandardError = true
+						RedirectStandardError = true,
+						RedirectStandardOutput = true
 					};
-					using var proc = Process.Start(psi);
-					if (proc != null)
-					{
-						proc.WaitForExit(1000); // Уменьшено до 1 секунды
-					}
+					using var process = Process.Start(startInfo);
+					process?.WaitForExit(1000);
 				}
-				catch { }
+				catch
+				{
+				}
 			});
 		}
 
-		// Нормализация имени процесса (удаление расширения и извлечение имени файла)
 		private static string NormalizeProcessName(string input)
 		{
-			var s = input.Trim().Trim('"');
-			if (s.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
-				 s = s.Substring(0, s.Length - 4);
-			
-			// Если указан полный путь, извлекаем только имя файла
+			var value = (input ?? string.Empty).Trim().Trim('"');
+			if (value.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+			{
+				value = value.Substring(0, value.Length - 4);
+			}
+
 			try
 			{
-				var fileName = System.IO.Path.GetFileNameWithoutExtension(s);
-				if (!string.IsNullOrEmpty(fileName)) return fileName;
+				var fileName = Path.GetFileNameWithoutExtension(value);
+				if (!string.IsNullOrEmpty(fileName))
+				{
+					return fileName;
+				}
 			}
-			catch { }
-			return s;
+			catch
+			{
+			}
+
+			return value;
 		}
 
-		// Перечисление всех окон процесса
 		private static void EnumThreadWindowsForProcess(Process process, Func<IntPtr, bool> onWindow)
 		{
-			ProcessThread[] threads = Array.Empty<ProcessThread>();
+			ProcessThread[] threads;
 			try
 			{
 				threads = process.Threads.Cast<ProcessThread>().ToArray();
@@ -482,21 +620,23 @@ namespace TheAlarm
 				return;
 			}
 
-			foreach (ProcessThread thread in threads)
+			foreach (var thread in threads)
 			{
 				try
 				{
-					EnumThreadWindows((uint)thread.Id, (hWnd, lParam) =>
+					EnumThreadWindows((uint)thread.Id, (hWnd, _) =>
 					{
-						// Обрабатываем только видимые окна верхнего уровня
 						if (IsWindowVisible(hWnd))
 						{
 							return onWindow(hWnd);
 						}
+
 						return true;
 					}, IntPtr.Zero);
 				}
-				catch { }
+				catch
+				{
+				}
 			}
 		}
 
@@ -505,15 +645,21 @@ namespace TheAlarm
 			try
 			{
 				using var process = Process.GetProcessById(processId);
-				EnumThreadWindowsForProcess(process, (hWnd) =>
+				EnumThreadWindowsForProcess(process, hWnd =>
 				{
-					if (!ShouldAffectWindow(hWnd)) return true;
+					if (!ShouldAffectWindow(hWnd))
+					{
+						return true;
+					}
+
 					SendMessage(hWnd, WM_SYSCOMMAND, (IntPtr)SC_MINIMIZE, IntPtr.Zero);
 					ShowWindow(hWnd, SW_FORCEMINIMIZE);
 					return true;
 				});
 			}
-			catch { }
+			catch
+			{
+			}
 		}
 
 		private static HashSet<int> GetProcessIdsWithDescendants(int rootProcessId)
@@ -525,14 +671,18 @@ namespace TheAlarm
 
 			while (queue.Count > 0)
 			{
-				int parentId = queue.Dequeue();
+				var parentId = queue.Dequeue();
 				if (!childrenByParent.TryGetValue(parentId, out var childIds))
+				{
 					continue;
+				}
 
 				foreach (var childId in childIds)
 				{
 					if (result.Add(childId))
+					{
 						queue.Enqueue(childId);
+					}
 				}
 			}
 
@@ -542,15 +692,19 @@ namespace TheAlarm
 		private static Dictionary<int, List<int>> BuildChildProcessLookup()
 		{
 			var childrenByParent = new Dictionary<int, List<int>>();
-			IntPtr snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+			var snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
 			if (snapshot == INVALID_HANDLE_VALUE)
+			{
 				return childrenByParent;
+			}
 
 			try
 			{
 				var entry = new PROCESSENTRY32 { dwSize = (uint)Marshal.SizeOf<PROCESSENTRY32>() };
 				if (!Process32First(snapshot, ref entry))
+				{
 					return childrenByParent;
+				}
 
 				do
 				{
@@ -572,100 +726,21 @@ namespace TheAlarm
 			return childrenByParent;
 		}
 
-		// Переключение отображения окна настроек (по горячим клавишам)
-		private void ToggleSettings(GlobalHotkeyWindow.ToggleKind kind)
-		{
-			if (_settingsForm.Visible)
-			{
-				ShowAlarm();
-			}
-			else
-			{
-				ShowSettings();
-			}
-		}
-
-		// Обработчик попытки закрытия формы (сворачивание в трей вместо закрытия)
 		private void AnyForm_FormClosingToTray(object? sender, FormClosingEventArgs e)
 		{
 			e.Cancel = true;
 			(sender as Form)?.Hide();
-			_mode = _settingsForm.Visible
-				? AppMode.HiddenWithSettings
-				: _alarmForm.Visible
-					? AppMode.VisibleAlarm
-					: AppMode.HiddenNoWindow;
 		}
 
-		// Выход из приложения
 		private void ExitApplication()
 		{
-			// Сохраняем список приложений перед выходом
-			SaveApplicationsList();
+			SaveState();
 			_notifyIcon.Visible = false;
+			_hotkeyManager.Dispose();
 			_hotkeyWindow.Dispose();
 			Environment.Exit(0);
 		}
 
-		// Путь к файлу конфигурации (ПОРТАТИВНЫЙ - рядом с exe-файлом!)
-		private static readonly string ConfigFilePath = Path.Combine(
-			AppDomain.CurrentDomain.BaseDirectory,
-			"config.json"
-		);
-
-		// Загрузка списка приложений из файла конфигурации
-		private void LoadApplicationsList()
-		{
-			try
-			{
-				// Проверяем существование файла перед чтением
-				if (File.Exists(ConfigFilePath))
-				{
-					string json = File.ReadAllText(ConfigFilePath);
-					var config = JsonSerializer.Deserialize<AppConfig>(json);
-					if (config != null)
-					{
-						_settingsForm.LoadConfiguration(config.CloseProcesses, config.MinimizeProcesses);
-					}
-				}
-				// Если файла нет - ничего не делаем, приложение работает с пустыми списками
-			}
-			catch { }
-		}
-
-		// Сохранение списка приложений в файл конфигурации
-		private void SaveApplicationsList()
-		{
-			try
-			{
-				var config = new AppConfig
-				{
-					CloseProcesses = _settingsForm.GetProcessConfigsForAction(ProcessAction.Close),
-					MinimizeProcesses = _settingsForm.GetProcessConfigsForAction(ProcessAction.Minimize)
-				};
-
-				// Файл будет создан автоматически в папке с программой
-				string json = JsonSerializer.Serialize(config, new JsonSerializerOptions { WriteIndented = true });
-				File.WriteAllText(ConfigFilePath, json);
-			}
-			catch { }
-		}
-
-		// Класс для хранения конфигурации приложения
-		private class AppConfig
-		{
-			public List<ProcessConfig> CloseProcesses { get; set; } = new List<ProcessConfig>();
-			public List<ProcessConfig> MinimizeProcesses { get; set; } = new List<ProcessConfig>();
-		}
-
-		// Класс для хранения настроек процесса
-		public class ProcessConfig
-		{
-			public string Name { get; set; } = string.Empty;
-			public bool ProtectChildren { get; set; } = false;
-		}
-
-		// Освобождение ресурсов при закрытии приложения
 		protected override void Dispose(bool disposing)
 		{
 			if (disposing)
@@ -673,19 +748,20 @@ namespace TheAlarm
 				_notifyIcon.Dispose();
 				_alarmTimer.Dispose();
 				_cornerCheckTimer.Dispose();
+				_hotkeyManager.Dispose();
 				_hotkeyWindow.Dispose();
 				_mouseHook.Dispose();
+				_alarmForm.Dispose();
+				_settingsForm.Dispose();
+				_macroForm.Dispose();
+				_popupForm.Dispose();
 			}
+
 			base.Dispose(disposing);
 		}
 
-		// ==================== Win32 API функции ====================
-		
 		[DllImport("user32.dll")]
 		private static extern bool GetCursorPos(out POINT lpPoint);
-
-		[DllImport("user32.dll")]
-		private static extern bool PostMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
 
 		[DllImport("user32.dll")]
 		private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
@@ -711,10 +787,57 @@ namespace TheAlarm
 		[DllImport("kernel32.dll", SetLastError = true)]
 		private static extern bool CloseHandle(IntPtr hObject);
 
+		[DllImport("user32.dll")]
+		private static extern int GetSystemMetrics(int nIndex);
+
+		[DllImport("user32.dll")]
+		private static extern int GetWindowLong(IntPtr hWnd, int nIndex);
+
+		[DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+		private static extern int GetClassName(IntPtr hWnd, System.Text.StringBuilder lpClassName, int nMaxCount);
+
+		[DllImport("user32.dll")]
+		private static extern bool DestroyIcon(IntPtr hIcon);
+
+		private static bool ShouldAffectWindow(IntPtr hWnd)
+		{
+			var ex = GetWindowLong(hWnd, GWL_EXSTYLE);
+			if ((ex & WS_EX_TOOLWINDOW) != 0 || (ex & WS_EX_NOACTIVATE) != 0)
+			{
+				return false;
+			}
+
+			var className = new System.Text.StringBuilder(256);
+			if (GetClassName(hWnd, className, className.Capacity) > 0)
+			{
+				var value = className.ToString();
+				if (value.IndexOf("IME", StringComparison.OrdinalIgnoreCase) >= 0)
+				{
+					return false;
+				}
+
+				if (string.Equals(value, "Default IME", StringComparison.OrdinalIgnoreCase)
+					|| string.Equals(value, "MSCTFIME UI", StringComparison.OrdinalIgnoreCase))
+				{
+					return false;
+				}
+			}
+
+			return true;
+		}
+
 		private delegate bool EnumThreadDelegate(IntPtr hWnd, IntPtr lParam);
 
 		private const uint TH32CS_SNAPPROCESS = 0x00000002;
 		private static readonly IntPtr INVALID_HANDLE_VALUE = new IntPtr(-1);
+		private const int SM_CXSCREEN = 0;
+		private const int SM_CYSCREEN = 1;
+		private const int WM_SYSCOMMAND = 0x0112;
+		private const int SC_MINIMIZE = 0xF020;
+		private const int SW_FORCEMINIMIZE = 11;
+		private const int GWL_EXSTYLE = -20;
+		private const int WS_EX_TOOLWINDOW = 0x00000080;
+		private const int WS_EX_NOACTIVATE = 0x08000000;
 
 		[StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
 		private struct PROCESSENTRY32
@@ -733,66 +856,11 @@ namespace TheAlarm
 			public string szExeFile;
 		}
 
-		[DllImport("user32.dll")]
-		private static extern int GetSystemMetrics(int nIndex);
-		
-		// Константы для GetSystemMetrics
-		private const int SM_CXSCREEN = 0;  // Ширина экрана
-		private const int SM_CYSCREEN = 1;  // Высота экрана
-
-		// Константы для сообщений Windows
-		private const int WM_CLOSE = 0x0010;
-		private const int WM_SYSCOMMAND = 0x0112;
-		private const int SC_CLOSE = 0xF060;
-		private const int SC_MINIMIZE = 0xF020;
-		private const int SW_MINIMIZE = 6;
-		private const int SW_FORCEMINIMIZE = 11;
-		
-		// Константы для стилей окон
-		private const int GWL_EXSTYLE = -20;
-		private const int WS_EX_TOOLWINDOW = 0x00000080;
-		private const int WS_EX_NOACTIVATE = 0x08000000;
-		private const int WS_EX_APPWINDOW = 0x00040000;
-
-		[DllImport("user32.dll")]
-		private static extern int GetWindowLong(IntPtr hWnd, int nIndex);
-
-		[DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
-		private static extern int GetClassName(IntPtr hWnd, System.Text.StringBuilder lpClassName, int nMaxCount);
-
-		[DllImport("user32.dll")]
-		private static extern bool DestroyIcon(IntPtr hIcon);
-
-		// Проверка, нужно ли влиять на данное окно (исключаем служебные окна IME)
-		private static bool ShouldAffectWindow(IntPtr hWnd)
-		{
-			// Игнорируем окна IME, служебные окна и неактивируемые окна
-			int ex = GetWindowLong(hWnd, GWL_EXSTYLE);
-			if ((ex & WS_EX_TOOLWINDOW) != 0) return false;
-			if ((ex & WS_EX_NOACTIVATE) != 0) return false;
-			
-			// Исключаем окна IME по имени класса
-			var sb = new System.Text.StringBuilder(256);
-			if (GetClassName(hWnd, sb, sb.Capacity) > 0)
-			{
-				var cls = sb.ToString();
-				if (cls.IndexOf("IME", StringComparison.OrdinalIgnoreCase) >= 0) return false;
-				if (string.Equals(cls, "Default IME", StringComparison.OrdinalIgnoreCase)) return false;
-				if (string.Equals(cls, "MSCTFIME UI", StringComparison.OrdinalIgnoreCase)) return false;
-			}
-			return true;
-		}
-
-		// Структура для хранения координат точки
 		[StructLayout(LayoutKind.Sequential)]
-		private struct POINT { public int X; public int Y; }
-
-		// Перечисление режимов работы приложения
-		private enum AppMode
+		private struct POINT
 		{
-			VisibleAlarm,       // Видимое окно будильника
-			HiddenWithSettings, // Скрытый режим с открытыми настройками
-			HiddenNoWindow      // Полностью скрытый режим (только трей)
+			public int X;
+			public int Y;
 		}
 	}
 }

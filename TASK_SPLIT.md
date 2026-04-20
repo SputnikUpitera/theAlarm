@@ -38,7 +38,7 @@
 Работа должна идти в таком порядке:
 
 1. Агент A задает общий storage/state контракт.
-2. Агент B подключает hotkey к этому контракту.
+2. Агент B подключает подсистему макросов и hotkey к этому контракту.
 3. Агент C подключает Pomodoro к тому же контракту.
 4. Агент D делает финальную зачистку, интеграцию и синхронизацию документации.
 
@@ -81,36 +81,36 @@
 - не реализовывать Pomodoro;
 - не переписывать глобальные hotkey beyond minimal compatibility.
 
-### 3.2. Агент B: Hotkeys and Command Engine
+### 3.2. Агент B: Macro Window, Macro Hotkeys and Macro Execution
 
 Основная зона ответственности:
 
-- user-defined hotkeys
-- multi-hotkey registration
-- command parsing and execution
-- UI редактирования hotkey
+- user-defined macros
+- multi-hotkey registration for macros
+- macro execution via hidden `cmd` or `PowerShell`
+- отдельное окно макросов по `Ctrl+Alt+F2`
+- UI редактирования макросов
 
 Основной ownership файлов:
 
-- `HotkeyDefinition.cs`
 - `HotkeyManager.cs`
-- `CommandExecutionService.cs`
-- `CommandParser.cs`
+- `MacroExecutionService.cs`
+- `MacroForm.cs`
 
 Основной ownership существующих файлов:
 
 - [GlobalHotkeyWindow.cs](/W:/Projects/CURSOR/CURSORTrayApp/GlobalHotkeyWindow.cs:7)
+- [AppState.cs](/W:/Projects/CURSOR/CURSORTrayApp/AppState.cs:8)
 
 Разрешенные интеграционные правки:
 
-- [SettingsForm.cs](/W:/Projects/CURSOR/CURSORTrayApp/SettingsForm.cs:12)
 - [TrayAppContext.cs](/W:/Projects/CURSOR/CURSORTrayApp/TrayAppContext.cs:16)
 - `AppState.cs`
 
 Ограничения:
 
 - не менять storage contract без явной необходимости;
-- не создавать отдельный формат хранения hotkey мимо `AppStateRepository`;
+- не создавать отдельный формат хранения макросов мимо `AppStateRepository`;
 - не реализовывать Pomodoro UI и логику;
 - не влезать в миграции старого конфига, кроме чтения уже заданной модели.
 
@@ -142,7 +142,7 @@
 
 - не создавать собственное отдельное хранилище;
 - не менять storage contract без необходимости;
-- не переписывать hotkey subsystem;
+- не переписывать macro/hotkey subsystem;
 - не менять `SettingsForm` кроме минимальных привязок, если это неизбежно.
 
 ### 3.4. Агент D: Integration, Cleanup, Documentation
@@ -166,7 +166,7 @@
 
 Ограничения:
 
-- не переизобретать storage, hotkey или Pomodoro;
+- не переизобретать storage, macro subsystem или Pomodoro;
 - не переписывать большие фичи вместо точечной интеграции;
 - `CONTEXT.md` обновлять только после подтверждения приемки соответствующих изменений.
 
@@ -188,8 +188,8 @@
 
 | Agent | Primary files | Allowed shared files | Should avoid |
 |---|---|---|---|
-| A | `AppState.cs`, `AppStateRepository.cs`, `EncryptionService.cs`, `MigrationService.cs`, `AppLog.cs` | `TrayAppContext.cs`, `AlarmForm.cs`, `SettingsForm.cs`, `IMPLEMENTATION_PLAN.md` | `GlobalHotkeyWindow.cs`, `PomodoroService.cs` |
-| B | `HotkeyDefinition.cs`, `HotkeyManager.cs`, `CommandExecutionService.cs`, `CommandParser.cs`, `GlobalHotkeyWindow.cs` | `SettingsForm.cs`, `TrayAppContext.cs`, `AppState.cs`, `IMPLEMENTATION_PLAN.md` | `MigrationService.cs`, `PomodoroService.cs`, heavy edits in `AlarmForm.cs` |
+| A | `AppState.cs`, `AppStateRepository.cs`, `EncryptionService.cs`, `MigrationService.cs`, `AppLog.cs` | `TrayAppContext.cs`, `AlarmForm.cs`, `SettingsForm.cs`, `IMPLEMENTATION_PLAN.md` | `GlobalHotkeyWindow.cs`, `PomodoroService.cs`, `MacroForm.cs` |
+| B | `HotkeyManager.cs`, `MacroExecutionService.cs`, `MacroForm.cs`, `GlobalHotkeyWindow.cs` | `TrayAppContext.cs`, `AppState.cs`, `IMPLEMENTATION_PLAN.md` | `MigrationService.cs`, `PomodoroService.cs`, heavy edits in `AlarmForm.cs`, `SettingsForm.cs` |
 | C | `PomodoroState.cs`, `PomodoroService.cs`, `AlarmForm.cs` | `TrayAppContext.cs`, `PopupForm.cs`, `AppState.cs`, `IMPLEMENTATION_PLAN.md` | `GlobalHotkeyWindow.cs`, `SettingsForm.cs`, `MigrationService.cs` |
 | D | `CONTEXT.md`, `IMPLEMENTATION_PLAN.md`, `README.md` | any file for cleanup-only integration | large new feature work |
 

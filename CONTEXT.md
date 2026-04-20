@@ -41,6 +41,7 @@
 
 - `AlarmForm` отвечает за постановку и отображение будильников.
 - `SettingsForm` отвечает за список процессов и автозапуск.
+- `MacroForm` отвечает за редактирование пользовательских макросов, test-run и статусы hotkey-регистрации.
 - `PopupForm` показывает сообщение при срабатывании.
 - `TrayAppContext` связывает формы, трей, таймеры, хуки, Win32-операции и persisted state.
 
@@ -107,13 +108,22 @@ Persisted state хранится рядом с исполняемым файло
 - [SettingsForm.cs](/W:/Projects/CURSOR/CURSORTrayApp/SettingsForm.cs:12)
   Скрытые настройки: 2 списка процессов, флаг защиты дочерних процессов, автозапуск, debug-кнопки.
 
+- [MacroForm.cs](/W:/Projects/CURSOR/CURSORTrayApp/MacroForm.cs:8)
+  Отдельное скрытое окно макросов: список карточек, hotkey capture, runner selector, test-run, add/delete и scrollable layout.
+
 - [PopupForm.cs](/W:/Projects/CURSOR/CURSORTrayApp/PopupForm.cs:8)
   Простое popup-окно с текстом и кнопкой закрытия.
 
 ### 4.3. Интеграция с системой
 
 - [GlobalHotkeyWindow.cs](/W:/Projects/CURSOR/CURSORTrayApp/GlobalHotkeyWindow.cs:7)
-  Регистрация глобального `Ctrl+Alt+F1`.
+  Hidden native window для регистрации нескольких глобальных hotkey.
+
+- [HotkeyManager.cs](/W:/Projects/CURSOR/CURSORTrayApp/HotkeyManager.cs:7)
+  Оркестрация внутренних hotkey окон и пользовательских macro hotkey с учетом конфликтов и фактического результата Win32 registration.
+
+- [MacroExecutionService.cs](/W:/Projects/CURSOR/CURSORTrayApp/MacroExecutionService.cs:7)
+  Выполнение макросов через hidden `cmd` или `PowerShell` без внешних `.bat/.cmd/.ps1` файлов.
 
 - [LowLevelMouseHook.cs](/W:/Projects/CURSOR/CURSORTrayApp/LowLevelMouseHook.cs:6)
   Low-level hook для перемещения мыши по системе.
@@ -121,7 +131,7 @@ Persisted state хранится рядом с исполняемым файло
 ### 4.4. State, storage и migration
 
 - [AppState.cs](/W:/Projects/CURSOR/CURSORTrayApp/AppState.cs)
-  Единая модель persisted state: schema version, process rules, alarm-ы, encrypted envelope.
+  Единая модель persisted state: schema version, process rules, alarm-ы, macro definitions и encrypted envelope.
 
 - [AppStateRepository.cs](/W:/Projects/CURSOR/CURSORTrayApp/AppStateRepository.cs)
   Чтение/запись `config.dat`, atomic save, warning fallback и orchestration миграции.
@@ -145,18 +155,49 @@ Persisted state хранится рядом с исполняемым файло
 2. Создается tray icon и контекстное меню.
 3. Загружается persisted state через `AppStateRepository`.
 4. Если найден только legacy `config.json`, выполняется миграция в encrypted `config.dat`.
-5. Process rules и alarm-ы применяются к `SettingsForm` и `AlarmForm`.
+5. Process rules, alarm-ы и macros применяются к `SettingsForm`, `AlarmForm` и `MacroForm`.
 6. При проблеме расшифровки или чтения показывается warning, а приложение стартует с пустым state.
 7. Запускается таймер проверки alarm-ов.
 8. Запускается таймер проверки углов как fallback.
 9. Запускается глобальный mouse hook.
-10. Регистрируется глобальная hotkey.
+10. Регистрируются внутренние global hotkey `Ctrl+Alt+F1` и `Ctrl+Alt+F2`.
+11. Регистрируются активные пользовательские macro hotkey из `AppState.Macros.Definitions`.
 
 ### 5.2. Открытие окон
 
 - Левый клик по tray icon открывает `AlarmForm`.
-- Hotkey переключает видимость `SettingsForm`.
+- `Ctrl+Alt+F1` переключает видимость `SettingsForm`.
+- `Ctrl+Alt+F2` переключает видимость `MacroForm`.
+- В tray menu нет отдельного пункта открытия окна макросов: это внутреннее скрытое окно.
 - Закрытие форм по `X` не завершает приложение, а прячет окно обратно в tray mode.
+
+### 5.6. Макросы
+
+Источник истины для макросов теперь находится в `AppState.Macros.Definitions`.
+
+Каждый макрос хранит:
+
+- `IsActive`;
+- `Hotkey`;
+- `RunnerType`;
+- `ScriptText`.
+
+Поведение:
+
+- окно макросов открывается только по `Ctrl+Alt+F2`;
+- UI построен как вертикальный scrollable-список карточек;
+- у карточки есть `Active`, поле hotkey, выбор `cmd`/`PowerShell`, `Test`, `Delete` и многострочный редактор текста;
+- тексты макросов живут внутри общего encrypted `config.dat`, а не в sidecar-файлах на диске;
+- пользовательские hotkey работают независимо от видимости окон, пока приложение живет в трее;
+- конфликт продуктово запрещается только между пользовательскими макросами;
+- сочетания `Ctrl+Alt+F1` и `Ctrl+Alt+F2` разрешены и для макросов тоже;
+- если Win32 не зарегистрировал сочетание, это отражается в статусе карточки, но не ломает остальное приложение.
+
+Исполнение:
+
+- `PowerShell` macro запускается hidden + `runas`;
+- `cmd` macro запускается через hidden elevated bootstrap без записи `.cmd` на диск;
+- test-run из UI использует тот же execution path, что и запуск по hotkey.
 
 ### 5.3. Будильники
 
@@ -259,7 +300,17 @@ Persisted state хранится рядом с исполняемым файло
 
 - mouse hook: [LowLevelMouseHook.cs](/W:/Projects/CURSOR/CURSORTrayApp/LowLevelMouseHook.cs:6)
 - hotkey: [GlobalHotkeyWindow.cs](/W:/Projects/CURSOR/CURSORTrayApp/GlobalHotkeyWindow.cs:7)
+- hotkey orchestration: [HotkeyManager.cs](/W:/Projects/CURSOR/CURSORTrayApp/HotkeyManager.cs:7)
+- macro execution: [MacroExecutionService.cs](/W:/Projects/CURSOR/CURSORTrayApp/MacroExecutionService.cs:7)
 - Win32 process/window actions: [TrayAppContext.cs](/W:/Projects/CURSOR/CURSORTrayApp/TrayAppContext.cs:308)
+
+### 6.5. Если нужно менять UX и хранение макросов
+
+Идти в:
+
+- [MacroForm.cs](/W:/Projects/CURSOR/CURSORTrayApp/MacroForm.cs:8)
+- [TrayAppContext.cs](/W:/Projects/CURSOR/CURSORTrayApp/TrayAppContext.cs:16)
+- [AppState.cs](/W:/Projects/CURSOR/CURSORTrayApp/AppState.cs)
 
 ## 7. Известные ошибки и проблемные места
 
@@ -274,22 +325,19 @@ Persisted state хранится рядом с исполняемым файло
 - перенос portable-сборки на другой профиль не гарантирует чтение уже сохраненного state;
 - сценарии backup/recovery пока не реализованы.
 
-### 7.2. Глобальная hotkey работает не так, как описано
+### 7.2. Регистрация global hotkey по-прежнему зависит от среды Windows
 
-По README ожидается, что hotkey ограничена состоянием окон, но в коде:
+Теперь hotkey subsystem уже поддерживает несколько внутренних и пользовательских сочетаний, но остаются platform edge-cases:
 
-- `Ctrl+Alt+F1` регистрируется глобально всегда;
-- `CanToggleEvaluator` присваивается, но вообще не используется;
-- значит hotkey активна независимо от реального режима приложения.
+- часть сочетаний может быть занята другим приложением;
+- продуктово сочетание может быть разрешено, но Win32 registration все равно вернет отказ;
+- итоговый статус зависит от фактической среды пользователя, а не только от локальной валидации UI.
 
-См. [TrayAppContext.cs](/W:/Projects/CURSOR/CURSORTrayApp/TrayAppContext.cs:120) и [GlobalHotkeyWindow.cs](/W:/Projects/CURSOR/CURSORTrayApp/GlobalHotkeyWindow.cs:11).
+### 7.3. Выполнение макросов чувствительно к UAC и shell-окружению
 
-### 7.3. В `GlobalHotkeyWindow` есть мертвое поле
-
-- поле `_closeId` не используется;
-- сборка уже дает предупреждение `CS0169`.
-
-См. [GlobalHotkeyWindow.cs](/W:/Projects/CURSOR/CURSORTrayApp/GlobalHotkeyWindow.cs:10).
+- макросы запускаются через hidden elevated shell;
+- при отказе в `runas` сценарий не выполняется;
+- edge-case команды `cmd` и `PowerShell` все еще лучше проверять вручную на целевой машине.
 
 ### 7.4. В `AlarmForm` есть мертвое событие
 
@@ -410,10 +458,13 @@ Persisted state хранится рядом с исполняемым файло
 1. [Program.cs](/W:/Projects/CURSOR/CURSORTrayApp/Program.cs:11)
 2. [TrayAppContext.cs](/W:/Projects/CURSOR/CURSORTrayApp/TrayAppContext.cs:16)
 3. [SettingsForm.cs](/W:/Projects/CURSOR/CURSORTrayApp/SettingsForm.cs:12)
-4. [AlarmForm.cs](/W:/Projects/CURSOR/CURSORTrayApp/AlarmForm.cs:9)
-5. [GlobalHotkeyWindow.cs](/W:/Projects/CURSOR/CURSORTrayApp/GlobalHotkeyWindow.cs:7)
-6. [LowLevelMouseHook.cs](/W:/Projects/CURSOR/CURSORTrayApp/LowLevelMouseHook.cs:6)
-7. [PopupForm.cs](/W:/Projects/CURSOR/CURSORTrayApp/PopupForm.cs:8)
+4. [MacroForm.cs](/W:/Projects/CURSOR/CURSORTrayApp/MacroForm.cs:8)
+5. [AlarmForm.cs](/W:/Projects/CURSOR/CURSORTrayApp/AlarmForm.cs:9)
+6. [HotkeyManager.cs](/W:/Projects/CURSOR/CURSORTrayApp/HotkeyManager.cs:7)
+7. [GlobalHotkeyWindow.cs](/W:/Projects/CURSOR/CURSORTrayApp/GlobalHotkeyWindow.cs:7)
+8. [MacroExecutionService.cs](/W:/Projects/CURSOR/CURSORTrayApp/MacroExecutionService.cs:7)
+9. [LowLevelMouseHook.cs](/W:/Projects/CURSOR/CURSORTrayApp/LowLevelMouseHook.cs:6)
+10. [PopupForm.cs](/W:/Projects/CURSOR/CURSORTrayApp/PopupForm.cs:8)
 
 ## 10. Рекомендуемые первые улучшения
 
@@ -432,6 +483,9 @@ Persisted state хранится рядом с исполняемым файло
 
 - проект собирается командой `dotnet build -c Debug`;
 - критических compile errors нет;
-- реализованы `AppState`, `AppStateRepository`, DPAPI-шифрование `config.dat`, миграция с legacy `config.json` и персистентность alarm-ов;
-- есть предупреждения про неиспользуемые члены;
+- реализованы `AppState`, `AppStateRepository`, DPAPI-шифрование `config.dat`, миграция с legacy `config.json`, персистентность alarm-ов и подсистема пользовательских макросов;
+- отдельное окно макросов работает по `Ctrl+Alt+F2`, без пункта в tray menu;
+- реализованы multi-hotkey registration, hidden macro execution через `cmd`/`PowerShell` и хранение макросов внутри общего encrypted state;
+- базовые ручные сценарии окна макросов подтверждены: add/delete/edit, scrollable list и live-scroll по бегунку;
+- остается предупреждение про неиспользуемое событие `AlarmForm.RequestPopup`;
 - основная архитектура понятна и пригодна для дальнейшей доработки.
