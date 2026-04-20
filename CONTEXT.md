@@ -15,7 +15,7 @@
 - приложение живет в системном трее;
 - обычный пользователь видит "будильник";
 - скрытый функционал управляет выбранными программами;
-- конфигурация процессов хранится рядом с `exe`, чтобы сборка оставалась portable.
+- persisted state хранится рядом с `exe`, чтобы сборка оставалась portable.
 
 ## 2. Технологический профиль
 
@@ -42,7 +42,7 @@
 - `AlarmForm` отвечает за постановку и отображение будильников.
 - `SettingsForm` отвечает за список процессов и автозапуск.
 - `PopupForm` показывает сообщение при срабатывании.
-- `TrayAppContext` связывает формы, трей, таймеры, хуки и Win32-операции.
+- `TrayAppContext` связывает формы, трей, таймеры, хуки, Win32-операции и persisted state.
 
 ### 3.3. Поведение строится на Win32, а не только на WinForms
 
@@ -59,10 +59,22 @@
 
 ### 3.4. Portable-first конфигурация
 
-Список процессов для Close/Minimize хранится в `config.json` рядом с исполняемым файлом.
-Такой подход удобен для portable-сборки, но чувствителен к правам записи в каталог запуска.
+Persisted state хранится рядом с исполняемым файлом, но больше не лежит в plaintext JSON.
+Текущее состояние сериализуется в единый `AppState`, шифруется через DPAPI `CurrentUser` и сохраняется в `config.dat`.
 
-См. [TrayAppContext.cs](/W:/Projects/CURSOR/CURSORTrayApp/TrayAppContext.cs:617).
+Если рядом лежит legacy `config.json`, а `config.dat` еще нет, при старте выполняется автоматическая миграция.
+Такой подход сохраняет portable-сценарий, но остается чувствительным к правам записи в каталог запуска и к Windows user context.
+
+### 3.5. Versioned state как точка расширения
+
+В проекте введена единая persistable-модель `AppState`.
+Сейчас в ней живут:
+
+- process rules;
+- alarm-ы;
+- version/schema для будущих миграций.
+
+Это важно для последующих этапов, потому что hotkey и Pomodoro должны встраиваться в тот же storage contract, а не создавать альтернативные файлы.
 
 ## 4. Карта структуры проекта
 
@@ -77,17 +89,15 @@
 Ключевые зоны в `TrayAppContext`:
 
 - [TrayAppContext.cs](/W:/Projects/CURSOR/CURSORTrayApp/TrayAppContext.cs:44)
-  Конструктор: создаются формы, иконка, таймеры, mouse hook, hotkey, подписки.
+  Конструктор: создаются формы, иконка, таймеры, mouse hook, hotkey, repository и загрузка persisted state.
 - [TrayAppContext.cs](/W:/Projects/CURSOR/CURSORTrayApp/TrayAppContext.cs:276)
   Проверка углов экрана.
 - [TrayAppContext.cs](/W:/Projects/CURSOR/CURSORTrayApp/TrayAppContext.cs:308)
   Выполнение действий над процессами.
 - [TrayAppContext.cs](/W:/Projects/CURSOR/CURSORTrayApp/TrayAppContext.cs:601)
   Корректный выход из приложения.
-- [TrayAppContext.cs](/W:/Projects/CURSOR/CURSORTrayApp/TrayAppContext.cs:617)
-  Загрузка конфигурации процессов.
-- [TrayAppContext.cs](/W:/Projects/CURSOR/CURSORTrayApp/TrayAppContext.cs:637)
-  Сохранение конфигурации процессов.
+- [TrayAppContext.cs](/W:/Projects/CURSOR/CURSORTrayApp/TrayAppContext.cs:16)
+  Применение state к формам и сохранение state при изменениях process rules/alarm-ов.
 
 ### 4.2. Формы
 
@@ -108,6 +118,23 @@
 - [LowLevelMouseHook.cs](/W:/Projects/CURSOR/CURSORTrayApp/LowLevelMouseHook.cs:6)
   Low-level hook для перемещения мыши по системе.
 
+### 4.4. State, storage и migration
+
+- [AppState.cs](/W:/Projects/CURSOR/CURSORTrayApp/AppState.cs)
+  Единая модель persisted state: schema version, process rules, alarm-ы, encrypted envelope.
+
+- [AppStateRepository.cs](/W:/Projects/CURSOR/CURSORTrayApp/AppStateRepository.cs)
+  Чтение/запись `config.dat`, atomic save, warning fallback и orchestration миграции.
+
+- [EncryptionService.cs](/W:/Projects/CURSOR/CURSORTrayApp/EncryptionService.cs)
+  DPAPI `CurrentUser` protect/unprotect без собственного ключа в коде.
+
+- [MigrationService.cs](/W:/Projects/CURSOR/CURSORTrayApp/MigrationService.cs)
+  Миграция legacy plaintext `config.json` в новый `AppState`.
+
+- [AppLog.cs](/W:/Projects/CURSOR/CURSORTrayApp/AppLog.cs)
+  Минимальное файловое логирование для load/save/migration ошибок storage-контура.
+
 ## 5. Как проект реально работает
 
 ### 5.1. Жизненный цикл
@@ -116,11 +143,14 @@
 
 1. Создаются все формы.
 2. Создается tray icon и контекстное меню.
-3. Загружается список процессов из `config.json`.
-4. Запускается таймер проверки alarm-ов.
-5. Запускается таймер проверки углов как fallback.
-6. Запускается глобальный mouse hook.
-7. Регистрируется глобальная hotkey.
+3. Загружается persisted state через `AppStateRepository`.
+4. Если найден только legacy `config.json`, выполняется миграция в encrypted `config.dat`.
+5. Process rules и alarm-ы применяются к `SettingsForm` и `AlarmForm`.
+6. При проблеме расшифровки или чтения показывается warning, а приложение стартует с пустым state.
+7. Запускается таймер проверки alarm-ов.
+8. Запускается таймер проверки углов как fallback.
+9. Запускается глобальный mouse hook.
+10. Регистрируется глобальная hotkey.
 
 ### 5.2. Открытие окон
 
@@ -130,18 +160,23 @@
 
 ### 5.3. Будильники
 
-`AlarmForm` хранит список alarm-ов в памяти в `_alarms`.
+`AlarmForm` держит рабочий список alarm-ов в памяти, но persisted source of truth теперь находится в `AppState`.
 
 Поведение:
 
 - пользователь выбирает дату, время, daily и сообщение;
 - alarm сохраняется как `TimeUtc`;
+- при добавлении или удалении `AlarmForm` подает сигнал, и `TrayAppContext` сохраняет обновленный state через repository;
 - `TrayAppContext` каждую секунду вызывает `ConsumeDueAlarms()`;
 - одноразовые alarm-ы удаляются;
 - daily alarm-ы пересоздаются на следующий день;
+- после consume/rollover alarm-ов state снова сохраняется;
 - для каждого сработавшего alarm-а показывается `PopupForm`.
 
-См. [AlarmForm.cs](/W:/Projects/CURSOR/CURSORTrayApp/AlarmForm.cs:194).
+Следствие:
+
+- alarm-ы переживают перезапуск приложения;
+- daily alarm после срабатывания сохраняется уже в новом времени.
 
 ### 5.4. Управление процессами
 
@@ -154,6 +189,9 @@
 
 - имя процесса;
 - флаг `ProtectChildren`.
+
+Эти правила теперь живут не в ad-hoc JSON внутри `TrayAppContext`, а в `AppState.ProcessRules`.
+`SettingsForm` остается UI-источником и UI-приемником, а `TrayAppContext` сохраняет изменения через repository.
 
 Логика:
 
@@ -192,7 +230,7 @@
 - таймеры;
 - mouse hook;
 - hotkey;
-- сохранение `config.json`.
+- orchestration persisted state и сохранение `config.dat`.
 
 ### 6.2. Если нужно менять UX будильника
 
@@ -227,20 +265,14 @@
 
 Ниже перечислены не просто "TODO", а реальные текущие расхождения или слабые места по коду.
 
-### 7.1. Будильники не сохраняются между запусками
+### 7.1. Encrypted storage привязан к Windows user context
 
-Проблема:
+Используется DPAPI `CurrentUser`.
+Это правильно для локального шифрования без хранения ключа в коде, но означает:
 
-- метод `SaveAlarms()` пустой;
-- `LoadAlarms()` существует, но не вызывается из runtime;
-- после перезапуска приложения все alarm-ы теряются.
-
-См. [AlarmForm.cs](/W:/Projects/CURSOR/CURSORTrayApp/AlarmForm.cs:249) и [AlarmForm.cs](/W:/Projects/CURSOR/CURSORTrayApp/AlarmForm.cs:263).
-
-Следствие:
-
-- UI создает ожидание персистентности;
-- фактически alarm subsystem сейчас только in-memory.
+- `config.dat` не переносится прозрачно между Windows-пользователями;
+- перенос portable-сборки на другой профиль не гарантирует чтение уже сохраненного state;
+- сценарии backup/recovery пока не реализованы.
 
 ### 7.2. Глобальная hotkey работает не так, как описано
 
@@ -290,28 +322,26 @@
 
 См. [TrayAppContext.cs](/W:/Projects/CURSOR/CURSORTrayApp/TrayAppContext.cs:102), [TrayAppContext.cs](/W:/Projects/CURSOR/CURSORTrayApp/TrayAppContext.cs:245) и [TrayAppContext.cs](/W:/Projects/CURSOR/CURSORTrayApp/TrayAppContext.cs:308).
 
-### 7.6. `config.json` рядом с `exe` удобен, но может ломаться при установке в защищенный каталог
+### 7.6. `config.dat` рядом с `exe` удобен, но все еще зависит от прав записи
 
 Проблема:
 
-- запись идет в `AppDomain.CurrentDomain.BaseDirectory`;
-- если приложение запущено из каталога без прав записи, сохранение silently fail, так как исключения подавляются.
-
-См. [TrayAppContext.cs](/W:/Projects/CURSOR/CURSORTrayApp/TrayAppContext.cs:637).
+- запись идет в `AppContext.BaseDirectory`;
+- если приложение запущено из каталога без прав записи, encrypted state может не сохраниться.
 
 Следствие:
 
-- пользователь может думать, что настройки применились;
-- реально они могут не сохраниться.
+- теперь это уже не silent fail для storage-контура: ошибка сохраняется в `thealarm.log`, а пользователь получает message box;
+- но сам architectural tradeoff portable-first storage никуда не делся.
 
-### 7.7. Ошибки в проекте часто глотаются без логирования
+### 7.7. Ошибки в проекте часто глотаются без логирования вне storage-контура
 
 Во многих местах используются пустые `catch`.
 
 Это встречается в:
 
 - загрузке иконки;
-- загрузке и сохранении конфига;
+- части low-level операций вокруг окон и процессов;
 - операциях над процессами;
 - `taskkill`;
 - обходе окон;
@@ -320,7 +350,7 @@
 Следствие:
 
 - приложение редко падает;
-- но диагностика проблем почти отсутствует;
+- но диагностика проблем почти отсутствует вне `AppStateRepository`/migration/save path;
 - поведение "ничего не произошло" трудно расследовать.
 
 ### 7.8. Debug-элементы находятся в production UI
@@ -389,12 +419,12 @@
 
 Если продолжать проект дальше, наибольший эффект дадут такие шаги:
 
-1. Реализовать нормальную персистентность alarm-ов.
-2. Убрать мертвые поля и события.
-3. Привести hotkey behavior к одному понятному правилу.
-4. Добавить минимальное логирование ошибок вместо пустых `catch`.
-5. Отделить debug UI от пользовательского UI.
-6. Явно определить стратегию хранения конфига: portable рядом с `exe` или user profile.
+1. Убрать мертвые поля и события.
+2. Привести hotkey behavior к одному понятному правилу.
+3. Расширить логирование за пределы storage-контура.
+4. Отделить debug UI от пользовательского UI.
+5. Явно определить долгосрочную стратегию хранения: portable рядом с `exe` или user profile.
+6. Добавить recovery/backups policy для поврежденного или нечитаемого `config.dat`.
 
 ## 11. Состояние на текущий момент
 
@@ -402,5 +432,6 @@
 
 - проект собирается командой `dotnet build -c Debug`;
 - критических compile errors нет;
+- реализованы `AppState`, `AppStateRepository`, DPAPI-шифрование `config.dat`, миграция с legacy `config.json` и персистентность alarm-ов;
 - есть предупреждения про неиспользуемые члены;
 - основная архитектура понятна и пригодна для дальнейшей доработки.

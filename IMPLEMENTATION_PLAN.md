@@ -28,11 +28,16 @@
 До отдельного пересмотра работаем с такими базовыми решениями:
 
 1. Хранилище конфигов шифруется через DPAPI с `DataProtectionScope.CurrentUser`.
-2. Сырые `.bat`-файлы и внешние скрипты для пользовательских hotkey не используются.
-3. Пользовательские hotkey сначала работают через встроенный command engine, а не через произвольный shell.
-4. Pomodoro встраивается в текущее окно будильника, а не в отдельную форму.
-5. Конфиги, hotkey, alarm-ы и настройки Pomodoro сводятся в единый persistable state.
-6. Любая новая персистентность должна проектироваться сразу под versioned migration.
+2. Пользовательские макросы не хранятся как отдельные `.bat`, `.cmd` или `.ps1` файлы на диске.
+3. Макросы хранятся внутри общего зашифрованного контейнера приложения.
+4. Макрос может исполняться через `cmd` или `PowerShell`, но запуск всегда скрытый.
+5. Макросы запускаются в административном режиме по принятому продуктовым решением поведению.
+6. Окно внутренних скрытых настроек и окно пользовательских макросов это разные подсистемы:
+   - `Ctrl+Alt+F1` открывает внутреннее окно настроек;
+   - `Ctrl+Alt+F2` открывает окно пользовательских макросов.
+7. Pomodoro встраивается в текущее окно будильника, а не в отдельную форму.
+8. Конфиги, макросы, alarm-ы и настройки Pomodoro сводятся в единый persistable state.
+9. Любая новая персистентность должна проектироваться сразу под versioned migration.
 
 ## 3. Целевое состояние после внедрения
 
@@ -41,11 +46,13 @@
 1. Единое зашифрованное хранилище настроек и runtime-state.
 2. Миграцию со старого plaintext `config.json`.
 3. Персистентные alarm-ы.
-4. Редактор пользовательских hotkey в UI.
-5. Поддержку нескольких глобальных hotkey.
-6. Встроенный механизм исполнения команд hotkey без внешних батников.
-7. Pomodoro tracker в интерфейсе будильника.
-8. Обновленный техдок с новой картой архитектуры.
+4. Отдельное окно макросов, открываемое по `Ctrl+Alt+F2`.
+5. Редактор пользовательских макросов в UI в виде вертикального списка карточек со скроллом.
+6. Поддержку нескольких глобальных hotkey для вызова макросов.
+7. Исполнение пользовательских макросов через скрытый `cmd` или `PowerShell` без внешних файлов.
+8. Общий зашифрованный контейнер с текстами макросов.
+9. Pomodoro tracker в интерфейсе будильника.
+10. Обновленный техдок с новой картой архитектуры.
 
 ## 4. Общая декомпозиция
 
@@ -53,7 +60,7 @@
 
 1. Foundation and storage refactor.
 2. Encrypted config and migration.
-3. User hotkeys and command engine.
+3. Macro window and global macro hotkeys.
 4. Pomodoro tracker.
 5. Integration, stabilization and documentation sync.
 
@@ -69,10 +76,10 @@
 - `EncryptedFileEnvelope`
 - `ProcessRulesState`
 - `AlarmState`
-- `HotkeyDefinition`
+- `MacroDefinition`
 - `PomodoroSettings`
 - `PomodoroState`
-- `ExecutionCommand` или `CommandDefinition`
+- `MacroExecutionOptions`
 
 ### 5.2. Новые сервисы
 
@@ -82,7 +89,7 @@
 - `EncryptionService`
 - `MigrationService`
 - `HotkeyManager`
-- `CommandExecutionService`
+- `MacroExecutionService`
 - `PomodoroService`
 
 ### 5.3. Принцип разделения ответственности
@@ -96,7 +103,7 @@
 
 ### Status
 
-`Todo`
+`Done`
 
 ### Цель
 
@@ -113,9 +120,11 @@
 4. Подготовить точки интеграции для:
    - process rules;
    - alarm-ов;
-   - hotkey;
+   - macro definitions;
    - Pomodoro.
 5. Добавить минимальное логирование ошибок вместо части пустых `catch`.
+6. Agent A: расширить `AppState` macro-section так, чтобы Agent B использовал общий storage contract, а не отдельный локальный файл.
+7. Agent A: зафиксировать минимальный encrypted data contract для `IsActive`, hotkey, `RunnerType` и текста макроса.
 
 ### Рекомендуемые файлы
 
@@ -138,11 +147,36 @@
 1. Слишком ранний большой рефактор может сломать текущие сценарии tray behavior.
 2. Если сделать слишком абстрактно, последующие этапы станут тяжелее, а не легче.
 
+### Agent A Macro Contract Notes
+
+- Current task scope: только storage/state contract под макросы в общем encrypted container.
+- Actual file touch:
+  - `AppState.cs`
+  - `IMPLEMENTATION_PLAN.md`
+- Repository expectation:
+  - `AppStateRepository` продолжает сериализовать весь `AppState` целиком;
+  - отдельный plaintext storage для макросов не допускается.
+- Constraint for Agent B:
+  - использовать macro-section из `AppState`;
+  - не вводить собственный файл или sidecar storage для hotkey/script text.
+
+### Implementation Result
+
+- `AppState` адаптирован под отдельный macro-section внутри общего state.
+- В state добавлены модели для хранения macro definitions, hotkey payload и runner type.
+- Существующий `AppStateRepository` не потребовал отдельного storage-кода, потому что он уже сериализует и шифрует весь `AppState` как один контейнер.
+
+### Remaining Constraints For Agent B
+
+- Agent B должен читать и писать макросы только через `AppState.Macros`.
+- Допускается развивать UI, hotkey manager и execution поверх текущего контракта, но без собственного файла хранения.
+- Если Agent B понадобится расширить macro payload, это нужно делать как совместимое расширение текущего state schema, а не обходным storage.
+
 ## 7. Этап 2. Encrypted Config and Migration
 
 ### Status
 
-`Todo`
+`Done`
 
 ### Цель
 
@@ -164,11 +198,16 @@
    - обработка ошибок.
 4. Реализовать миграцию старого `config.json`.
 5. Добавить персистентность alarm-ов в ту же схему хранения.
-6. Зафиксировать поведение при ошибке расшифровки:
+6. Подготовить storage contract для общего контейнера пользовательских макросов:
+   - без plaintext файлов;
+   - с текстом макроса внутри общего state;
+   - с возможностью хранить тип раннера `cmd` или `PowerShell`.
+7. Зафиксировать поведение при ошибке расшифровки:
    - уведомление;
    - safe fallback;
    - недопущение silent corruption.
-7. Обновить пути и вызовы сохранения в runtime.
+8. Обновить пути и вызовы сохранения в runtime.
+9. Agent A: адаптировать encrypted state schema под macro metadata без реализации UI, hotkey manager и runner execution.
 
 ### Рекомендуемые файлы
 
@@ -192,7 +231,29 @@
 1. DPAPI привяжет данные к Windows user context.
 2. Нужна аккуратная миграция без потери process config.
 
-## 8. Этап 3. User Hotkeys and Command Engine
+### Agent A Macro Contract Notes
+
+- Macro data must stay inside the same encrypted `config.dat` container as other app state.
+- Contract must support:
+  - `IsActive`;
+  - hotkey payload;
+  - `RunnerType` as `cmd` or `PowerShell`;
+  - script text.
+- No migration from legacy plaintext macro storage is needed, because такого storage не существует и добавлять его нельзя.
+
+### Implementation Result
+
+- Encrypted state schema now supports macro payload in the same `config.dat`.
+- Macro contract is covered by shared repository serialization, DPAPI encryption and the existing corruption/decryption fallback path.
+- Separate plaintext macro storage was not introduced.
+
+### Remaining Constraints For Agent B
+
+- Runner type in storage is constrained to `cmd` or `PowerShell`.
+- Hotkey storage is state-only payload at this stage; registration/runtime semantics belong to Agent B.
+- Macro execution, hidden launch, admin launch and UI validation are intentionally out of scope for Agent A.
+
+## 8. Этап 3. Macro Window and Global Macro Hotkeys
 
 ### Status
 
@@ -200,71 +261,77 @@
 
 ### Цель
 
-Добавить настраиваемые глобальные hotkey и встроенные команды без хранения внешних батников.
+Добавить отдельное окно пользовательских макросов и глобальные hotkey для их запуска без хранения внешних файлов макросов на диске.
 
 ### Подзадачи
 
-1. Спроектировать модель `HotkeyDefinition`:
+1. Спроектировать модель `MacroDefinition`:
    - `Id`
-   - `Name`
-   - `Enabled`
+   - `IsActive`
    - `Modifiers`
    - `Key`
-   - `CommandText`
-   - `Description`
-2. Переписать текущую схему hotkey из [GlobalHotkeyWindow.cs](/W:/Projects/CURSOR/CURSORTrayApp/GlobalHotkeyWindow.cs:7) на мульти-hotkey архитектуру.
-3. Реализовать `HotkeyManager` с:
+   - `RunnerType`
+   - `ScriptText`
+   - `CreatedUtc`
+   - `UpdatedUtc`
+2. Явно разделить внутренние hotkey окон и пользовательские hotkey макросов:
+   - `Ctrl+Alt+F1` остается для текущего скрытого окна настроек;
+   - `Ctrl+Alt+F2` открывает отдельное окно макросов;
+   - пользовательские hotkey работают независимо от видимости окон.
+3. Переписать текущую схему hotkey из [GlobalHotkeyWindow.cs](/W:/Projects/CURSOR/CURSORTrayApp/GlobalHotkeyWindow.cs:7) на мульти-hotkey архитектуру.
+4. Реализовать `HotkeyManager` с:
    - регистрацией нескольких hotkey;
    - удалением;
    - обновлением;
    - обработкой конфликтов;
    - событиями активации.
-4. Реализовать `CommandExecutionService`.
-5. Спроектировать и внедрить минимальный DSL/список команд.
-6. Добавить UI-редактор hotkey в [SettingsForm.cs](/W:/Projects/CURSOR/CURSORTrayApp/SettingsForm.cs:12).
-7. Добавить валидацию:
+5. Реализовать `MacroExecutionService`:
+   - запуск через `cmd`;
+   - запуск через `PowerShell`;
+   - скрытый запуск без окна консоли;
+   - запуск с административными правами;
+   - кнопка ручного тестового запуска из UI.
+6. Добавить отдельное окно макросов, вызываемое по `Ctrl+Alt+F2`.
+7. Реализовать UI окна макросов по карточкам:
+   - `Active`;
+   - поле hotkey;
+   - большой многострочный редактор текста;
+   - `Delete`;
+   - `+` для добавления новой карточки;
+   - вертикальный скролл без жесткого лимита на количество макросов.
+8. Добавить валидацию:
    - пустая комбинация;
-   - недопустимая комбинация;
-   - конфликт;
-   - пустая команда;
-   - некорректный синтаксис команды.
-8. Реализовать тестовый вызов команды из интерфейса.
-
-### Рекомендуемый первый набор встроенных команд
-
-- `show_alarm`
-- `show_settings`
-- `close_process:<name>`
-- `minimize_process:<name>`
-- `notify:<text>`
-- `pomodoro:start`
-- `pomodoro:pause`
-- `pomodoro:resume`
-- `pomodoro:skip`
+   - конфликт с другим пользовательским макросом;
+   - пустой текст макроса.
+9. Разрешить любые сочетания клавиш, включая системные и внутренние:
+   - конфликт запрещается только между пользовательскими макросами;
+   - `Ctrl+Alt+F1` и `Ctrl+Alt+F2` допускаются для пользовательского макроса как побочное параллельное поведение.
+10. Подключить хранение макросов к общему зашифрованному state.
 
 ### Рекомендуемые файлы
 
-- новый файл `HotkeyDefinition.cs`
+- новый файл `MacroDefinition.cs`
 - новый файл `HotkeyManager.cs`
-- новый файл `CommandExecutionService.cs`
-- новый файл `CommandParser.cs`
+- новый файл `MacroExecutionService.cs`
+- новый файл `MacroForm.cs`
 - [GlobalHotkeyWindow.cs](/W:/Projects/CURSOR/CURSORTrayApp/GlobalHotkeyWindow.cs:7)
 - [TrayAppContext.cs](/W:/Projects/CURSOR/CURSORTrayApp/TrayAppContext.cs:16)
-- [SettingsForm.cs](/W:/Projects/CURSOR/CURSORTrayApp/SettingsForm.cs:12)
+- `AppState.cs`
 
 ### Критерии готовности
 
-1. Пользователь может создать, отредактировать и удалить hotkey через UI.
-2. Hotkey сохраняются в зашифрованном конфиге.
-3. Несколько hotkey могут работать одновременно.
-4. Команды исполняются без внешних `.bat`.
-5. Ошибки регистрации и конфликтов объясняются в интерфейсе.
+1. `Ctrl+Alt+F2` открывает отдельное окно макросов.
+2. Пользователь может создать, отредактировать, активировать и удалить макрос через UI.
+3. Макросы сохраняются в зашифрованном контейнере приложения.
+4. Несколько hotkey макросов могут работать одновременно.
+5. Макрос исполняется без внешних `.bat/.cmd/.ps1` файлов.
+6. Запуск из UI и запуск по hotkey работают при положении приложения в трее.
 
 ### Риски
 
-1. Некоторые сочетания Windows не удастся зарегистрировать.
-2. Непродуманный command DSL быстро станет нерасширяемым.
-3. Слишком гибкое исполнение команд ухудшит безопасность.
+1. Некоторые сочетания Windows не удастся зарегистрировать через стандартный API, даже если продуктово они разрешены.
+2. Запуск с повышенными правами потребует аккуратной реализации и проверки фактического поведения UAC.
+3. Скрытый запуск shell-команд усложняет диагностику ошибок исполнения.
 
 ## 9. Этап 4. Pomodoro Tracker
 
@@ -348,7 +415,7 @@
 1. Проверить интеграцию:
    - encrypted storage;
    - alarm persistence;
-   - custom hotkeys;
+   - macro hotkeys and macro window;
    - Pomodoro.
 2. Удалить или закрыть мертвые части старой архитектуры:
    - `_closeId`
@@ -378,10 +445,10 @@
 - `AppStateRepository.cs`
 - `EncryptionService.cs`
 - `MigrationService.cs`
-- `HotkeyDefinition.cs`
+- `MacroDefinition.cs`
 - `HotkeyManager.cs`
-- `CommandExecutionService.cs`
-- `CommandParser.cs`
+- `MacroExecutionService.cs`
+- `MacroForm.cs`
 - `PomodoroState.cs`
 - `PomodoroService.cs`
 - `AppLog.cs`
@@ -399,7 +466,7 @@
 Если работу делить между агентами, безопасная декомпозиция такая:
 
 1. Агент A: foundation, storage, encryption, migration.
-2. Агент B: hotkey models, manager, UI, command engine.
+2. Агент B: macro models, macro window, hotkey manager, macro execution.
 3. Агент C: Pomodoro models, service, UI integration.
 4. Агент D: integration cleanup, documentation sync, final stabilization.
 
@@ -415,9 +482,9 @@
 
 | Area | Status | Owner | Notes |
 |---|---|---|---|
-| Foundation and storage refactor | Todo | Unassigned | |
-| Encrypted config and migration | Todo | Unassigned | |
-| User hotkeys and command engine | Todo | Unassigned | |
+| Foundation and storage refactor | Done | Agent A | Shared AppState macro section added; Agent B must reuse this storage contract |
+| Encrypted config and migration | Done | Agent A | Shared encrypted config.dat schema confirmed to carry macro payload in the common container |
+| Macro window and global macro hotkeys | Todo | Unassigned | |
 | Pomodoro tracker | Todo | Unassigned | |
 | Integration and documentation sync | Todo | Unassigned | |
 
@@ -427,8 +494,8 @@
 
 1. Конфиг и новые пользовательские настройки шифруются на диске.
 2. Старые данные мигрируются без ручного вмешательства.
-3. Пользователь может создавать свои hotkey через UI.
-4. Hotkey выполняют команды без внешних батников.
+3. Пользователь может создавать свои макросы через отдельное окно.
+4. Макросы выполняются по hotkey без внешних файлов на диске.
 5. В приложении есть работающий Pomodoro tracker.
 6. Alarm-ы и Pomodoro-параметры переживают перезапуск.
 7. `CONTEXT.md` и этот план приведены в актуальное состояние.

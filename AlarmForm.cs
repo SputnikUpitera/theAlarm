@@ -10,9 +10,10 @@ namespace TheAlarm
 	{
 		// Событие для запроса показа всплывающего окна
 		public event EventHandler<string>? RequestPopup;
+		public event EventHandler? AlarmsChanged;
 
 		// Список всех установленных будильников
-		private readonly List<AlarmItem> _alarms = new List<AlarmItem>();
+		private readonly List<AlarmState> _alarms = new List<AlarmState>();
 		
 		// Элементы управления формы
 		private readonly DateTimePicker _timePicker;     // Выбор времени
@@ -124,13 +125,13 @@ namespace TheAlarm
 				var isDaily = _dailyCheckbox.Checked;
 				
 				// Добавляем будильник в список
-				_alarms.Add(new AlarmItem { 
+				_alarms.Add(new AlarmState {
 					TimeUtc = candidate.ToUniversalTime(), 
 					Message = msg,
 					IsDaily = isDaily
 				});
 				RefreshAlarmList();
-				SaveAlarms();
+				OnAlarmsChanged();
 			};
 
 			Controls.Add(_timePicker);
@@ -177,13 +178,13 @@ namespace TheAlarm
 				
 				foreach (ListViewItem item in _alarmListView.SelectedItems)
 				{
-					if (item.Tag is AlarmItem ai)
+					if (item.Tag is AlarmState ai)
 					{
 						_alarms.Remove(ai);
 					}
 				}
 				RefreshAlarmList();
-				SaveAlarms();
+				OnAlarmsChanged();
 			};
 			
 			Controls.Add(_alarmListView);
@@ -194,8 +195,8 @@ namespace TheAlarm
 		public List<string> ConsumeDueAlarms()
 		{
 			var nowUtc = DateTime.UtcNow;
-			var due = new List<AlarmItem>();
-			var dailyAlarms = new List<AlarmItem>();
+			var due = new List<AlarmState>();
+			var dailyAlarms = new List<AlarmState>();
 			
 			// Находим все будильники, чье время уже наступило
 			foreach (var a in _alarms)
@@ -226,7 +227,7 @@ namespace TheAlarm
 				// Удаляем старый будильник
 				_alarms.Remove(a);
 				// Добавляем новый на следующий день
-				_alarms.Add(new AlarmItem { 
+				_alarms.Add(new AlarmState {
 					TimeUtc = a.TimeUtc.AddDays(1), 
 					Message = a.Message,
 					IsDaily = true
@@ -234,9 +235,7 @@ namespace TheAlarm
 			}
 			
 			RefreshAlarmList();
-			
-			// Сохраняем обновленный список будильников
-			SaveAlarms();
+			OnAlarmsChanged();
 			
 			// Возвращаем список сообщений
 			var messages = new List<string>();
@@ -246,27 +245,31 @@ namespace TheAlarm
 		}
 
 		// Загрузка списка будильников из файла
-		public void LoadAlarms(List<AlarmItem> alarms)
+		public void LoadAlarms(List<AlarmState> alarms)
 		{
 			_alarms.Clear();
-			_alarms.AddRange(alarms);
+			foreach (var alarm in alarms)
+			{
+				if (alarm == null)
+				{
+					continue;
+				}
+
+				_alarms.Add(alarm.Clone().Normalize());
+			}
 			RefreshAlarmList();
 		}
 
 		// Получение списка будильников для сохранения
-		public List<AlarmItem> GetAlarms()
+		public List<AlarmState> GetAlarms()
 		{
-			return new List<AlarmItem>(_alarms);
-		}
-
-		// Сохранение списка будильников
-		private void SaveAlarms()
-		{
-			try
+			var alarms = new List<AlarmState>();
+			foreach (var alarm in _alarms)
 			{
-				// Сохранение происходит автоматически при изменении списка приложений
+				alarms.Add(alarm.Clone().Normalize());
 			}
-			catch { }
+
+			return alarms;
 		}
 
 		// Обновление отображения списка будильников
@@ -291,12 +294,9 @@ namespace TheAlarm
 			_deleteSelectedButton.Visible = _alarms.Count > 0;
 		}
 
-		// Класс для хранения информации о будильнике
-		public class AlarmItem
+		private void OnAlarmsChanged()
 		{
-			public DateTime TimeUtc { get; set; }  // Время срабатывания (UTC)
-			public string Message { get; set; } = string.Empty;  // Сообщение будильника
-			public bool IsDaily { get; set; } = false;  // Флаг ежедневного будильника
+			AlarmsChanged?.Invoke(this, EventArgs.Empty);
 		}
 
 		// Освобождение ресурсов формы
