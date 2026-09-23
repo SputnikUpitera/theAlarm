@@ -1,0 +1,64 @@
+name: Publish Windows Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Publish self-contained single-file app
+        shell: pwsh
+        run: >-
+          dotnet publish .\TheAlarm.csproj
+          --configuration Release
+          --runtime win-x64
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:EnableCompressionInSingleFile=true
+          -p:PublishReadyToRun=true
+          -p:DebugType=None
+          -p:DebugSymbols=false
+          --output .\artifacts\release\publish
+
+      - name: Package portable executable
+        shell: pwsh
+        run: |
+          $publishDirectory = Join-Path $PWD "artifacts\release\publish"
+          $configPath = Join-Path $publishDirectory "config.dat"
+          if (Test-Path -LiteralPath $configPath) {
+            Remove-Item -LiteralPath $configPath -Force
+          }
+
+          $exePath = Join-Path $publishDirectory "TheAlarm.exe"
+          if (-not (Test-Path -LiteralPath $exePath)) {
+            throw "Publish output is missing TheAlarm.exe"
+          }
+
+          $archivePath = Join-Path $PWD "artifacts\TheAlarm-win-x64.zip"
+          Compress-Archive -LiteralPath $exePath -DestinationPath $archivePath -CompressionLevel Optimal -Force
+
+      - name: Create GitHub Release and upload portable build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          gh release create $tag ".\artifacts\TheAlarm-win-x64.zip" `
+            --title "TheAlarm $tag" `
+            --generate-notes
