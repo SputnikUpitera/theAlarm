@@ -81,7 +81,15 @@ internal static class Program
         Check(!popup.IsDisposed, "Popup disposed on user close");
         popup.Show(); popup.Hide();
         alarm.LoadAlarms(new List<AlarmState> { new() { TimeUtc = DateTime.UtcNow.AddHours(1), Message = "Проверка расписания", IsDaily = true } });
-        if (Environment.GetEnvironmentVariable("THEALARM_CAPTURE_UI") == "1") { Capture(alarm, "alarm"); Capture(macros, "macros"); }
+        if (Environment.GetEnvironmentVariable("THEALARM_CAPTURE_UI") == "1")
+        {
+            // Documentation examples are isolated from stored user data and never executed.
+            cornerCopy.Actions.CloseProcesses = new() { new() { Name = "notepad", ProtectChildren = true } };
+            cornerCopy.Actions.MinimizeProcesses = new() { new() { Name = "CalculatorApp" } };
+            var example = new MacroDefinition { Name = "Рабочие окна", IsActive = false, Hotkey = HotkeyText.ToMacroHotkey(gesture) };
+            macros.LoadMacros(new[] { cornerCopy, example });
+            Capture(alarm, "alarm"); Capture(macros, "macros");
+        }
         using var editor = (Form)Activator.CreateInstance(typeof(AppState).Assembly.GetType("TheAlarm.MacroActionForm")!, cornerCopy)!;
         if (Environment.GetEnvironmentVariable("THEALARM_CAPTURE_UI") == "1") Capture(editor, "editor");
         using var picker = (Form)Activator.CreateInstance(typeof(AppState).Assembly.GetType("TheAlarm.ProcessPickerForm")!)!;

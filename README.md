@@ -1,125 +1,119 @@
-# theAlarm - быстрое закрытие/сворачивание
-## Русская версия
+# TheAlarm
 
-### Описание
-Данное приложение позволяет мгновенно и без нажатий каких-либо клавиш закрывать либо сворачивать
-определённые, выбранные вами, приложения. А во избежание лишних вопросов оно замаскированно под будильник!
+TheAlarm — будильник и фоновая утилита для управления приложениями Windows. Настраивайте действия для углов экрана и глобальных горячих клавиш: сворачивайте окна, завершайте процессы и запускайте необязательные команды cmd или PowerShell. Редактор макросов скрыт за сочетанием клавиш, а само приложение работает в системном трее.
 
-Лёгким движением руки вы подводите курсор в верхний правый угол экрана - выбранные процессы закрываются
-А если в нижний правый - сворачиваются
+## Скачать 1.3.0
 
-### Требования
-- Windows 10 или новее
-- .NET SDK 8.0 (или новее) для сборки малообъёмного приложения
+- **[Windows 64-bit (x64)](https://github.com/SputnikUpitera/theAlarm/releases/download/v1.3.0/TheAlarm-win-x64.zip)** — для большинства современных компьютеров.
+- **[Windows 32-bit (x86)](https://github.com/SputnikUpitera/theAlarm/releases/download/v1.3.0/TheAlarm-win-x86.zip)** — для 32-битной Windows.
+- [Все релизы и история версий](https://github.com/SputnikUpitera/theAlarm/releases)
 
-### Сборка (framework-dependent)
-```bash
-dotnet build -c Release -p:AssemblyName=TheAlarm
-```
-**Размер**: ~150KB; **Требования**: .NET 8.0 Runtime должен быть установлен на целевой машине
+Готовые сборки автономные: устанавливать .NET отдельно не нужно. Распакуйте архив в папку с правом записи и запустите `TheAlarm.exe`. Не запускайте приложение прямо из ZIP.
 
-### Сборка (self-contained - portable)
-```bash
-dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -p:AssemblyName=TheAlarm
-```
-**Размер**: ~70MB; **Требования**: не требует установленного .NET
+## Требования
 
-Исполняемый файл будет создан по пути:
-```
-TheAlarm\bin\Release\net8.0-windows\win-x64\publish\TheAlarm.exe
-```
+Windows 10 или новее. Разрядность Windows можно посмотреть в «Параметры → Система → О системе». Сборка x86 опубликована, но запуск на отдельной 32-битной ОС пока не проверялся.
 
-### Использование
-- При запуске приложение сворачивается в системный трей
-- Левый клик по иконке в трее: открывает окно будильника
-- Правый клик по иконке в трее: меню с "Open Alarm Clock" и "Exit"
+## Инструкция
 
-### Будильник (видимое окно)
-- Установка времени с помощью выбора даты и времени
-- Чекбокс "Daily" для ежедневных будильников
-- Ввод опционального сообщения
-- При срабатывании будильника появляется всплывающее окно
-- Ежедневные будильники автоматически переносятся на следующий день
-- Одноразовые будильники удаляются после срабатывания
+Скриншоты показывают интерфейс 1.3.0 с демонстрационными данными.
 
-### Скрытые настройки (горячие клавиши)
-- Переключение окна настроек: Ctrl+Alt+F1
-- **Горячие клавиши работают только когда открыто окно будильника или настроек**
-- В полностью скрытом режиме (только иконка в трее) горячие клавиши отключены
-- Добавление имен процессов (например, "notepad", "chrome") без ".exe"
-- Флажки для защиты дочерних процессов (если отмечено, дочерние процессы не закрываются)
-- Поведение в скрытом режиме:
-  - Курсор в правом верхнем углу экрана → закрытие выбранных программ
-  - Курсор в правом нижнем углу экрана → сворачивание выбранных программ
+### 1. Откройте будильник
 
-### Закрытие приложения
-- Приложение полностью закрывается только через меню трея "Exit"
-- Закрытие окон крестиком сворачивает приложение в системный трей
-- Приложение продолжает работать в фоновом режиме для выполнения функций будильника и управления процессами
+При запуске приложение находится в трее. Левый клик по значку открывает будильник; правый показывает меню «Открыть будильник» и «Выйти».
 
-### Автозапуск с Windows
-- Чекбокс "Start with Windows" для автоматического запуска
-- Кнопка "Enable Autostart (Admin)" для принудительного включения с правами администратора
+Введите время в формате `ЧЧ:ММ`, дату `ДД.ММ.ГГГГ` и, при необходимости, сообщение. Включите «Ежедневно» для повторения: в этом режиме используется ближайшее наступление указанного времени, а не введённая дата. Нажмите «Добавить».
 
----
+![Будильник: расписание, сигнал и автозапуск](docs/images/alarm.png)
 
-## English Version
+В разделе «Сигнал будильника» можно загрузить свой MP3, прослушать его или вернуть стандартный сигнал. Выбранный MP3 остаётся внешним файлом: не перемещайте и не удаляйте его. Переключатель «Запускать с Windows» включает автозапуск.
 
-### Requirements
-- Windows 10 or later
-- .NET SDK 8.0 (or later) for building lightweight application
+При срабатывании появляется уведомление со звуком. Одноразовый будильник удаляется, ежедневный переносится на следующее срабатывание.
 
-### Build (framework-dependent)
-From Developer PowerShell or CMD:
+### 2. Откройте макросы
 
-```bash
-dotnet build -c Release -p:AssemblyName=TheAlarm
-```
-**Size**: ~150KB; **Requirements**: .NET 8.0 Runtime must be installed on target machine
+Из открытого окна будильника нажмите **Ctrl+Alt+F1**. Будильник сменится окном макросов. Повторное нажатие вернёт будильник.
 
-### Build (self-contained - portable)
-```bash
-dotnet publish -c Release
-```
-**Size**: ~70MB; **Requirements**: no .NET installation required
+**Это внутреннее сочетание не работает, когда приложение полностью скрыто в трее.** Пользовательские хоткеи активных макросов, напротив, работают в фоне. Ctrl+Alt+F2 не используется.
 
-The executable will be generated at:
-```
-TheAlarm\bin\Release\net8.0-windows\win-x64\publish\TheAlarm.exe
+![Макросы: углы экрана и пользовательские сочетания](docs/images/macros.png)
+
+Макрос «Углы экрана» существует по умолчанию. Включите нужные углы круглыми переключателями и отдельно выберите для каждого действие: «Закрыть» или «Свернуть». Общий переключатель «Включён» управляет активностью макроса.
+
+Кнопка «Новый макрос» создаёт макрос с горячей клавишей. «Настроить действия» открывает его редактор, «Запустить» выполняет действия вручную.
+
+### 3. Настройте действия
+
+Задайте название и нажмите нужное сочетание в поле хоткея. У углового макроса триггер фиксированный: углы экрана.
+
+![Редактор действий макроса](docs/images/editor.png)
+
+Списки «Закрыть процессы» и «Свернуть процессы» независимы. Добавьте имя процесса вручную или выберите его кнопкой «Из запущенных». «Убрать» удаляет выделенные строки из списка.
+
+Справа находится «Защитить дочерние»: при включении дочерние процессы исключаются из соответствующего действия. Один клик по квадрату меняет настройку; один клик по строке только выделяет её, двойной меняет настройку. Для выделенных строк также работает пробел.
+
+Перед завершением целевые окна принудительно сворачиваются. Если завершение не удалось, оставшееся окно можно восстановить с панели задач.
+
+**Завершение процессов принудительное: несохранённые данные могут быть потеряны.** Сначала проверяйте макрос на ненужных тестовых окнах.
+
+### 4. При необходимости добавьте команды
+
+Включите «Выполнить команды», выберите `cmd` или `PowerShell` и впишите команды прямо в редактор. Внешние BAT/PS1-файлы для этого не нужны. Нажмите «Сохранить».
+
+Оболочка запускается скрыто с запросом повышения прав; окно UAC может потребовать подтверждения. Действия над процессами используют права самого TheAlarm: для управления повышенными приложениями могут понадобиться права администратора.
+
+Одинаковое сочетание нельзя назначить двум пользовательским макросам. Сочетания, занятые Windows или другой программой, могут не зарегистрироваться; поддержка абсолютно всех системных комбинаций не гарантируется. В редакторе пользовательские горячие клавиши временно приостанавливаются.
+
+### 5. Сверните или завершите приложение
+
+Крестик главного окна скрывает приложение в трей; будильники и активные макросы продолжают работать. В модальном редакторе крестик закрывает редактор без сохранения изменений. Для полного выхода используйте **«Выйти» в меню трея**.
+
+## Хранение и ограничения
+
+Настройки и тексты макросов хранятся рядом с EXE в общем зашифрованном `config.dat`. В релизные архивы пользовательские настройки не включаются.
+
+Шифрование использует Windows DPAPI для текущего пользователя: файл нельзя прочитать как обычный текст, но это не защита от программ, работающих с правами той же учётной записи. Перенос файла на другой компьютер или к другому пользователю не гарантирует расшифровку.
+
+Полная совместимость произвольных BAT-сценариев не гарантируется: cmd-команды передаются через стандартный ввод. Длинные PowerShell-команды ограничены длиной командной строки Windows. Pomodoro пока не реализован.
+
+## Сборка из исходников
+
+Нужны Windows и .NET SDK 8.
+
+Обычная сборка, требующая установленного **.NET Desktop Runtime 8**:
+
+```powershell
+dotnet build -c Release
 ```
 
-### Usage
-- On launch, the app minimizes to system tray
-- Left-click tray icon: opens Alarm Clock window
-- Right-click tray icon: menu with "Open Alarm Clock" and "Exit"
+Результат: `bin/Release/net8.0-windows/TheAlarm.exe`.
 
-### Alarm Clock (visible interface)
-- Set time using date and time pickers
-- "Daily" checkbox for recurring alarms
-- Optional message input
-- When alarm triggers, a small popup appears with your message
-- Daily alarms automatically reschedule for next day
-- One-time alarms are removed after triggering
+Автономная сборка:
 
-### Hidden Settings (hotkey interface)
-- Toggle settings window with: Ctrl+Alt+F1
-- **Hotkeys work only when alarm window or settings window is open**
-- In completely hidden mode (tray icon only) hotkeys are disabled
-- Add process names (e.g., "notepad", "chrome") without ".exe"
-- Checkboxes to protect child processes (if checked, child processes won't be closed)
-- Behavior in hidden mode:
-  - Move mouse to top-right corner of primary screen → close selected programs
-  - Move mouse to bottom-right corner of primary screen → minimize selected programs
+```powershell
+dotnet publish TheAlarm.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -o artifacts/release/win-x64
+```
 
-### Application Closing
-- Application fully exits only via tray menu "Exit" item
-- Closing windows with X button minimizes the application to system tray
-- Application continues running in background for alarm and process control functions
+Для 32-битного варианта замените оба вхождения `win-x64` на `win-x86`. Workflow GitHub Actions собирает обе архитектуры при публикации тега `v*`.
 
-### Windows Autostart
-- "Start with Windows" checkbox for automatic startup
-- "Enable Autostart (Admin)" button for forced enablement with admin rights
+Проверки:
 
+```powershell
+dotnet run --project tests/Smoke/Smoke.csproj -p:PublishSingleFile=false
+```
+
+Технический контекст: [CONTEXT.md](CONTEXT.md). План: [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md). Ограничения и анализ стабильности: [STABILITY_AUDIT.md](STABILITY_AUDIT.md).
+
+## English Quick Start
+
+Download the [64-bit](https://github.com/SputnikUpitera/theAlarm/releases/download/v1.3.0/TheAlarm-win-x64.zip) or [32-bit](https://github.com/SputnikUpitera/theAlarm/releases/download/v1.3.0/TheAlarm-win-x86.zip) portable build, extract it to a writable folder and run `TheAlarm.exe`. No separate .NET installation is required.
+
+- Left-click the tray icon to open alarms. Right-click and choose «Выйти» to exit.
+- Press **Ctrl+Alt+F1** while the alarm or macro window is visible to switch between them. This internal shortcut is disabled in tray-only mode; user macro hotkeys remain active.
+- Configure each screen corner independently, or create a hotkey macro. Add processes manually or select running ones.
+- The right-hand checkbox protects child processes. Click it once, or double-click the row, to toggle.
+- Optional cmd/PowerShell commands are edited in the app and run through a hidden elevated shell; UAC confirmation may appear.
+- Forced process termination can lose unsaved work. Encrypted settings use current-user Windows DPAPI and are not guaranteed to be portable across accounts or computers.
 
 
 
