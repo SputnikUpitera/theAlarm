@@ -2,13 +2,15 @@
 
 TheAlarm — будильник и фоновая утилита для управления приложениями Windows. Настраивайте действия для углов экрана и глобальных горячих клавиш: сворачивайте окна, завершайте процессы и запускайте необязательные команды cmd или PowerShell. Редактор макросов скрыт за сочетанием клавиш, а само приложение работает в системном трее.
 
-## Скачать 1.3.0
+## Скачать портативную версию 1.3.0
 
-- **[Windows 64-bit (x64)](https://github.com/SputnikUpitera/theAlarm/releases/download/v1.3.0/TheAlarm-win-x64.zip)** — для большинства современных компьютеров.
-- **[Windows 32-bit (x86)](https://github.com/SputnikUpitera/theAlarm/releases/download/v1.3.0/TheAlarm-win-x86.zip)** — для 32-битной Windows.
+- **[Скачать Portable — Windows 64-bit / x64 (ZIP)](https://github.com/SputnikUpitera/theAlarm/releases/download/v1.3.0/TheAlarm-win-x64.zip)** — портативная 64-битная версия, для большинства современных компьютеров.
+- **[Скачать Portable — Windows 32-bit / x86 (ZIP)](https://github.com/SputnikUpitera/theAlarm/releases/download/v1.3.0/TheAlarm-win-x86.zip)** — портативная 32-битная версия. Обозначение x86 означает 32 бита, а не 64.
 - [Все релизы и история версий](https://github.com/SputnikUpitera/theAlarm/releases)
 
-Готовые сборки автономные: устанавливать .NET отдельно не нужно. Распакуйте архив в папку с правом записи и запустите `TheAlarm.exe`. Не запускайте приложение прямо из ZIP.
+**Оба архива — Portable / self-contained:** без установщика и без необходимости устанавливать .NET. В каждом архиве один `TheAlarm.exe` со встроенными компонентами среды выполнения. Распакуйте архив в папку с правом записи и запустите `TheAlarm.exe`. Не запускайте приложение прямо из ZIP.
+
+При работе рядом с EXE создаётся зашифрованный `config.dat`. Portable означает запуск без установки; шифрование настроек при этом привязано к пользователю Windows (подробнее ниже).
 
 ## Требования
 
@@ -106,7 +108,7 @@ dotnet run --project tests/Smoke/Smoke.csproj -p:PublishSingleFile=false
 
 ## English Quick Start
 
-Download the [64-bit](https://github.com/SputnikUpitera/theAlarm/releases/download/v1.3.0/TheAlarm-win-x64.zip) or [32-bit](https://github.com/SputnikUpitera/theAlarm/releases/download/v1.3.0/TheAlarm-win-x86.zip) portable build, extract it to a writable folder and run `TheAlarm.exe`. No separate .NET installation is required.
+Download **[Portable 64-bit / x64 (ZIP)](https://github.com/SputnikUpitera/theAlarm/releases/download/v1.3.0/TheAlarm-win-x64.zip)** or **[Portable 32-bit / x86 (ZIP)](https://github.com/SputnikUpitera/theAlarm/releases/download/v1.3.0/TheAlarm-win-x86.zip)**, extract it to a writable folder and run `TheAlarm.exe`. Both builds are self-contained: no installer or separate .NET installation is required.
 
 - Left-click the tray icon to open alarms. Right-click and choose «Выйти» to exit.
 - Press **Ctrl+Alt+F1** while the alarm or macro window is visible to switch between them. This internal shortcut is disabled in tray-only mode; user macro hotkeys remain active.
@@ -114,7 +116,6 @@ Download the [64-bit](https://github.com/SputnikUpitera/theAlarm/releases/downlo
 - The right-hand checkbox protects child processes. Click it once, or double-click the row, to toggle.
 - Optional cmd/PowerShell commands are edited in the app and run through a hidden elevated shell; UAC confirmation may appear.
 - Forced process termination can lose unsaved work. Encrypted settings use current-user Windows DPAPI and are not guaranteed to be portable across accounts or computers.
-
 
 
 
