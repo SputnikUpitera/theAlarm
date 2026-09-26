@@ -392,6 +392,24 @@ namespace TheAlarm
 		Controls.Add(cursorCoordsLabel);
 		Controls.Add(killSelectedButton);
 		Controls.Add(minimizeSelectedButton);
+		var pickerRow = new FlowLayoutPanel { Left = margin, Top = debugRowTop + 42, Width = contentWidth, Height = 42 };
+		var pickClose = new Button { Text = "Choose running: close", Width = 245, Height = 34 };
+		var pickMinimize = new Button { Text = "Choose running: minimize", Width = 245, Height = 34 };
+		pickerRow.Controls.Add(pickClose);
+		pickerRow.Controls.Add(pickMinimize);
+		Controls.Add(pickerRow);
+		ClientSize = new Size(ClientSize.Width, pickerRow.Bottom + margin);
+		pickClose.Click += (_, __) => PickProcesses(_closeList);
+		pickMinimize.Click += (_, __) => PickProcesses(_minimizeList);
+	}
+
+	private void PickProcesses(CheckedListBox target)
+	{
+		using var picker = new ProcessPickerForm();
+		if (picker.ShowDialog(this) != DialogResult.OK) return;
+		foreach (var name in picker.SelectedNames)
+			if (!target.Items.Cast<string>().Any(existing => string.Equals(existing, name, StringComparison.OrdinalIgnoreCase))) target.Items.Add(name);
+		OnConfigurationChanged();
 	}
 
 	// Метод для вызова события изменения конфигурации

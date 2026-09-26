@@ -8,8 +8,8 @@ namespace TheAlarm
 	// Форма для управления будильниками
 	public partial class AlarmForm : Form
 	{
+		public string AlarmSoundPath { get; set; } = string.Empty;
 		// Событие для запроса показа всплывающего окна
-		public event EventHandler<string>? RequestPopup;
 		public event EventHandler? AlarmsChanged;
 
 		// Список всех установленных будильников
@@ -189,6 +189,25 @@ namespace TheAlarm
 			
 			Controls.Add(_alarmListView);
 			Controls.Add(_deleteSelectedButton);
+			var soundButton = new Button { Text = "Choose MP3 signal...", Left = 15, Top = 370, Width = 190, Height = 32 };
+			var previewSound = new Button { Text = "Preview", Left = 355, Top = 370, Width = 85, Height = 32 };
+			previewSound.Click += (_, __) => AlarmAudio.Play(AlarmSoundPath);
+			var stopSound = new Button { Text = "Stop", Left = 445, Top = 370, Width = 70, Height = 32 };
+			stopSound.Click += (_, __) => AlarmAudio.Stop();
+			Controls.Add(previewSound);
+			Controls.Add(stopSound);
+			var resetSound = new Button { Text = "Default signal", Left = 215, Top = 370, Width = 130, Height = 32 };
+			soundButton.Click += (_, __) =>
+			{
+				using var dialog = new OpenFileDialog { Filter = "MP3 audio (*.mp3)|*.mp3", CheckFileExists = true };
+				if (dialog.ShowDialog(this) != DialogResult.OK) return;
+				AlarmSoundPath = dialog.FileName;
+				OnAlarmsChanged();
+			};
+			resetSound.Click += (_, __) => { AlarmSoundPath = string.Empty; OnAlarmsChanged(); };
+			Controls.Add(soundButton);
+			Controls.Add(resetSound);
+			ClientSize = new Size(ClientSize.Width, 420);
 		}
 
 		// Получение и удаление всех сработавших будильников

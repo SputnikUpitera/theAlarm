@@ -6,7 +6,7 @@ namespace TheAlarm
 {
 	public static class AppLog
 	{
-		private static readonly string LogFilePath = Path.Combine(AppContext.BaseDirectory, "thealarm.log");
+		private static readonly string LogFilePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TheAlarm", "thealarm.log");
 		private static readonly Encoding Utf8NoBom = new UTF8Encoding(false);
 		private static readonly object Sync = new object();
 
@@ -34,6 +34,7 @@ namespace TheAlarm
 
 				lock (Sync)
 				{
+					Directory.CreateDirectory(Path.GetDirectoryName(LogFilePath)!);
 					File.AppendAllText(LogFilePath, text, Utf8NoBom);
 				}
 			}

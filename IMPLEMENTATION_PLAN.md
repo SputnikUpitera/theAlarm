@@ -1,5 +1,18 @@
 # TheAlarm: Implementation Plan
 
+## UI and Stability Follow-up (2026-09-26)
+
+Status: implemented, awaiting Windows UI acceptance.
+
+- Macro empty state shows only the first-macro action; existing cards show the header add action.
+- Mouse wheel over a script scrolls cards; Ctrl+wheel scrolls the editor. Card actions occupy a separate row.
+- Added DPI awareness, high-contrast support and accessible control names. This is an initial accessibility pass, not a complete visual redesign.
+- Popup user-close now hides the reusable form, preventing reuse of a disposed popup. The reported crash is not yet reproduced; unhandled errors are logged under LocalApplicationData/TheAlarm.
+- Alarm signal supports an external MP3 path stored in encrypted AppState, preview, stop and default-sound fallback. The audio file must remain available.
+- Running-process picker supports search, refresh and multiple checked processes for both action lists; rules remain name-based and affect matching instances.
+- Build and diff checks performed. Pending manual acceptance: repeated alarm after closing popup, MP3 playback, DPI/high contrast, keyboard navigation and scrolling, process selection and restart persistence.
+- CONTEXT.md awaits user acceptance under the documentation protocol.
+
 Этот документ переводит обзор из [CONTEXT.md](/W:/Projects/CURSOR/CURSORTrayApp/CONTEXT.md:1) в прикладной план реализации.
 Он нужен для реальной разработки, декомпозиции задач и синхронизации нескольких агентов.
 

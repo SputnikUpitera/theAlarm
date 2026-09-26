@@ -23,8 +23,9 @@ namespace TheAlarm
 			ObjectDisposedException.ThrowIf(_disposed, this);
 
 			registrationId = _nextRegistrationId++;
-			if (!RegisterHotKey(Handle, registrationId, (uint)gesture.ToWin32Modifiers(), (uint)gesture.Key))
+			if (!RegisterHotKey(Handle, registrationId, (uint)gesture.ToWin32Modifiers() | 0x4000, (uint)gesture.Key))
 			{
+				AppLog.Error($"RegisterHotKey failed for {gesture}; Win32 error {Marshal.GetLastWin32Error()}.");
 				registrationId = 0;
 				return false;
 			}

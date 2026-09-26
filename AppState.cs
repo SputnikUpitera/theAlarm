@@ -7,6 +7,7 @@ namespace TheAlarm
 {
 	public sealed class AppState
 	{
+		public string AlarmSoundPath { get; set; } = string.Empty;
 		public const int CurrentSchemaVersion = 1;
 
 		public int SchemaVersion { get; set; } = CurrentSchemaVersion;

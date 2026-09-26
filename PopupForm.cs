@@ -20,6 +20,11 @@ namespace TheAlarm
 
 		public PopupForm()
 		{
+			FormClosing += (_, e) =>
+			{
+				if (e.CloseReason == CloseReason.UserClosing) { e.Cancel = true; Hide(); }
+			};
+			VisibleChanged += (_, __) => { if (!Visible) AlarmAudio.Stop(); };
 			Text = "The Alarm";
 			FormBorderStyle = FormBorderStyle.FixedToolWindow;
 			StartPosition = FormStartPosition.CenterScreen;

@@ -39,6 +39,7 @@ namespace TheAlarm
 			_settingsForm = new SettingsForm();
 			_macroForm = new MacroForm(_macroExecutionService);
 			_popupForm = new PopupForm();
+			foreach (var form in new Form[] { _alarmForm, _settingsForm, _macroForm, _popupForm }) UiTheme.Apply(form);
 
 			var trayIcon = LoadTrayIcon();
 			_notifyIcon = new NotifyIcon
@@ -109,6 +110,7 @@ namespace TheAlarm
 					ToProcessConfigs(_appState.ProcessRules.CloseProcesses),
 					ToProcessConfigs(_appState.ProcessRules.MinimizeProcesses));
 				_alarmForm.LoadAlarms(_appState.Alarms);
+				_alarmForm.AlarmSoundPath = _appState.AlarmSoundPath;
 				_macroForm.LoadMacros(_appState.Macros.Definitions);
 
 				if (!string.IsNullOrWhiteSpace(loadResult.WarningMessage))
@@ -142,6 +144,7 @@ namespace TheAlarm
 					MinimizeProcesses = ToProcessRules(_settingsForm.GetProcessConfigsForAction(ProcessAction.Minimize))
 				},
 				Alarms = _alarmForm.GetAlarms(),
+				AlarmSoundPath = _alarmForm.AlarmSoundPath,
 				Macros = new MacroState
 				{
 					Definitions = _macroForm.GetMacros()
@@ -392,6 +395,7 @@ namespace TheAlarm
 		private void AlarmTimer_Tick(object? sender, EventArgs e)
 		{
 			var due = _alarmForm.ConsumeDueAlarms();
+			if (due.Count > 0) AlarmAudio.Play(_alarmForm.AlarmSoundPath);
 			foreach (var message in due)
 			{
 				_popupForm.SetMessage(message);

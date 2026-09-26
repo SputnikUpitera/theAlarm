@@ -45,7 +45,7 @@ namespace TheAlarm
 			var headerPanel = new Panel
 			{
 				Dock = DockStyle.Top,
-				Height = 60,
+				Height = 88,
 				Padding = new Padding(16, 12, 16, 12),
 				BackColor = DarkBackground
 			};
@@ -56,16 +56,16 @@ namespace TheAlarm
 				Text = "User Macros",
 				Font = new Font("Segoe UI Semibold", 12f, FontStyle.Bold),
 				ForeColor = LightText,
-				Location = new Point(0, 2)
+				Location = new Point(16, 12)
 			};
 
 			var subtitleLabel = new Label
 			{
 				AutoSize = true,
-				Text = "Each active macro can listen globally while the app stays in the tray.",
+				Text = "Wheel: scroll cards. Ctrl + wheel: scroll script. Active macros work in the tray.",
 				Font = new Font("Segoe UI", 9f),
 				ForeColor = MutedText,
-				Location = new Point(0, 28)
+				Location = new Point(16, 54)
 			};
 
 			_addButton = new Button
@@ -177,6 +177,7 @@ namespace TheAlarm
 				_addButton.Left = ClientSize.Width - _addButton.Width - 16;
 				LayoutCards();
 			};
+			UpdateEmptyState();
 		}
 
 		public event EventHandler? MacrosChanged;
@@ -234,6 +235,7 @@ namespace TheAlarm
 			}).Clone().Normalize();
 
 			var card = new MacroCardControl(normalizedDefinition);
+			UiTheme.Apply(card);
 			card.DefinitionChanged += OnCardDefinitionChanged;
 			card.DeleteRequested += (_, __) =>
 			{
@@ -319,6 +321,8 @@ namespace TheAlarm
 		private void UpdateEmptyState()
 		{
 			_emptyStatePanel.Visible = _cards.Count == 0;
+			_addButton.Visible = _cards.Count > 0;
+			_bottomPanel.Visible = false;
 		}
 
 		protected override void Dispose(bool disposing)
@@ -359,7 +363,7 @@ namespace TheAlarm
 			{
 				MacroId = definition.Id;
 
-				Height = 270;
+				Height = 310;
 				Margin = new Padding(0, 0, 0, 16);
 				Padding = new Padding(16);
 				BackColor = DarkSurface;
@@ -434,9 +438,9 @@ namespace TheAlarm
 				};
 				_deleteButton.FlatAppearance.BorderColor = DangerRed;
 
-				_scriptBox = new TextBox
+				_scriptBox = new MacroEditor
 				{
-					Location = new Point(12, 56),
+					Location = new Point(12, 96),
 					Multiline = true,
 					ScrollBars = ScrollBars.Vertical,
 					AcceptsReturn = true,
@@ -445,6 +449,7 @@ namespace TheAlarm
 					BackColor = DarkControl,
 					ForeColor = LightText,
 					Font = new Font("Consolas", 10f),
+					AccessibleName = "Macro script. Ctrl plus mouse wheel scrolls the script",
 					Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom,
 					Width = 710,
 					Height = 160
@@ -452,7 +457,7 @@ namespace TheAlarm
 
 				_statusLabel = new Label
 				{
-					Location = new Point(12, 225),
+					Location = new Point(12, 269),
 					Width = 710,
 					Height = 24,
 					ForeColor = DangerRed,
@@ -468,6 +473,12 @@ namespace TheAlarm
 				Controls.Add(_deleteButton);
 				Controls.Add(_scriptBox);
 				Controls.Add(_statusLabel);
+				_runnerComboBox.Top = 52;
+				_runnerLabel.Top = 56;
+				_testButton.Top = 48;
+				_deleteButton.Top = 48;
+				_hotkeyBox.AccessibleName = "Macro keyboard shortcut";
+				_runnerComboBox.AccessibleName = "Script language";
 
 				_activeCheckBox.CheckedChanged += (_, __) => DefinitionChanged?.Invoke(this, EventArgs.Empty);
 				_hotkeyBox.ValueChanged += (_, __) => DefinitionChanged?.Invoke(this, EventArgs.Empty);
@@ -522,8 +533,8 @@ namespace TheAlarm
 				_statusLabel.Width = Math.Max(400, innerWidth - 8);
 				_deleteButton.Left = ClientSize.Width - Padding.Right - _deleteButton.Width - 4;
 				_testButton.Left = _deleteButton.Left - _testButton.Width - 12;
-				_runnerComboBox.Left = Math.Min(_testButton.Left - _runnerComboBox.Width - 16, 410);
-				_runnerLabel.Left = _runnerComboBox.Left - 58;
+				_runnerLabel.Left = 12;
+				_runnerComboBox.Left = 76;
 			}
 
 			private void ApplyDefinition(MacroDefinition definition)
@@ -537,6 +548,26 @@ namespace TheAlarm
 				}
 				_scriptBox.Text = definition.ScriptText ?? string.Empty;
 				SetStatus(null);
+			}
+		}
+
+		private sealed class MacroEditor : TextBox
+		{
+			protected override void WndProc(ref Message m)
+			{
+				if (m.Msg == 0x020A && (ModifierKeys & Keys.Control) == 0)
+				{
+					for (Control? parent = Parent; parent != null; parent = parent.Parent)
+					{
+						if (parent is LiveScrollPanel host)
+						{
+							int delta = unchecked((short)(m.WParam.ToInt64() >> 16));
+							host.AutoScrollPosition = new Point(0, Math.Max(0, -host.AutoScrollPosition.Y - delta));
+							return;
+						}
+					}
+				}
+				base.WndProc(ref m);
 			}
 		}
 

@@ -11,6 +11,9 @@
 
   <PropertyGroup>
     <AssemblyName>TheAlarm</AssemblyName>
+    <Version>1.1.0</Version>
+    <AssemblyVersion>1.1.0.0</AssemblyVersion>
+    <FileVersion>1.1.0.0</FileVersion>
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>false</SelfContained>
     <PublishReadyToRun>true</PublishReadyToRun>
@@ -20,7 +23,6 @@
     <DebugSymbols>false</DebugSymbols>
   </PropertyGroup>
 </Project>
-
 
 
 
