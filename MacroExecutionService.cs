@@ -21,7 +21,7 @@ namespace TheAlarm
 			var startInfo = BuildStartInfo(definition);
 			try
 			{
-				var process = Process.Start(startInfo);
+				using var process = Process.Start(startInfo);
 				if (process == null)
 				{
 					errorMessage = "Failed to start elevated hidden shell process.";

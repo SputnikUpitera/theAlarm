@@ -9,6 +9,7 @@ namespace TheAlarm
 		private static readonly string LogFilePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TheAlarm", "thealarm.log");
 		private static readonly Encoding Utf8NoBom = new UTF8Encoding(false);
 		private static readonly object Sync = new object();
+		internal static string? TestLogFilePath { get; set; }
 
 		public static void Info(string message)
 		{
@@ -34,8 +35,9 @@ namespace TheAlarm
 
 				lock (Sync)
 				{
-					Directory.CreateDirectory(Path.GetDirectoryName(LogFilePath)!);
-					File.AppendAllText(LogFilePath, text, Utf8NoBom);
+					var path = TestLogFilePath ?? LogFilePath;
+					Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+					File.AppendAllText(path, text, Utf8NoBom);
 				}
 			}
 			catch

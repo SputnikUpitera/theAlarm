@@ -48,6 +48,7 @@ namespace TheAlarm
 			}
 
 			_registrations.Clear();
+			_nextRegistrationId = 1;
 		}
 
 		protected override void WndProc(ref Message m)
@@ -55,7 +56,9 @@ namespace TheAlarm
 			if (m.Msg == WM_HOTKEY)
 			{
 				var registrationId = m.WParam.ToInt32();
-				if (_registrations.TryGetValue(registrationId, out var gesture))
+				var packed = m.LParam.ToInt64();
+				var actual = new HotkeyGesture((HotkeyModifiers)(packed & 0xF), (Keys)((packed >> 16) & 0xFFFF));
+				if (_registrations.TryGetValue(registrationId, out var gesture) && gesture.Equals(actual))
 				{
 					HotkeyPressed?.Invoke(gesture);
 				}

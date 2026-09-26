@@ -22,7 +22,7 @@ namespace TheAlarm
 			}
 
 			var json = File.ReadAllText(legacyConfigPath);
-			var legacyConfig = JsonSerializer.Deserialize<LegacyConfig>(json, _jsonOptions);
+			var legacyConfig = JsonSerializer.Deserialize<LegacyConfig>(json, _jsonOptions) ?? throw new InvalidDataException("Empty legacy configuration.");
 
 			return new AppState
 			{

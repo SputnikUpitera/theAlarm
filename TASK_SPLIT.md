@@ -1,5 +1,11 @@
 # TheAlarm: Task Split
 
+## Current Override: Unified Macros (2026-09-26)
+
+Latest UI ownership also includes ThemedInputs.cs and StartupService.cs. Follow Selected Visual Direction in IMPLEMENTATION_PLAN.md: startup in AlarmForm, legacy SettingsForm deleted, independently selectable corner actions and circular controls centered on the rectangle vertices.
+
+Read the Unified Macros Revision in IMPLEMENTATION_PLAN.md before executing older tasks below. Agent B owns MacroForm, MacroActionForm, ModernForm, RoundedControls and the unified process/script runtime. There is one hidden window toggled by Ctrl+Alt+F1 only outside tray-only state; internal F2 is removed. Corner actions are a built-in macro; additional macros use hotkeys and optional commands. Preserve AppState.Macros.Definitions and shared encryption. Agent C's Pomodoro remains separate. Agent D validates integration and updates CONTEXT.md only after user acceptance; do not reintroduce the superseded two-window design.
+
 Этот документ фиксирует безопасное разделение задач между несколькими агентами.
 Его цель:
 

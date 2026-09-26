@@ -1,5 +1,39 @@
 # TheAlarm: Implementation Plan
 
+## Screenshot Alignment Follow-up (2026-09-26)
+
+Implemented the six user screenshot corrections: vertically centered switch track/text and single-line input text; explicit Name and Function/trigger captions above the editor fields; editor enlarged to 960x880 with process panels consuming flexible remaining height and denser 28px minimum rows; removed outer window outline and caption separator; body/code font 10pt -> 12pt, card headings 13pt -> 15pt. Palette now follows the neutral dark shadcn theme (background #0a0a0a, surface #171717, foreground #fafafa, muted #a3a3a3), retaining blue primary accents. Table empty areas use the same surface as their rows. This is a native adaptation, not pixel-identical browser rendering. Geometry regression checks cover input centering, captions and panel expansion; final visual acceptance remains with the user. Existing menu-lifetime fixes retained.
+
+## Stability Audit (2026-09-26)
+
+User requested crash investigation and a fresh logic/performance audit; visual alignment is paused pending user screenshots. Findings, evidence, fixes, tests and unresolved risks are recorded in STABILITY_AUDIT.md. The option-menu crash is now tied to an actual ObjectDisposedException log, unlike earlier unconfirmed background reports. ChoiceButton owns its menu until disposal, not until Closed. Also fixed failed-load overwrite protection, process-name normalization/argument boundaries, Win capture, stale hotkey-message validation, process selection persistence, multi-alarm messages and ancient daily-alarm catchup. Optimized process snapshots and macro/text allocations. Smoke checks include 250 menu cycles, 50 modal editor lifecycles and a 15-second tray-loop diagnostic; these do not replace long-term testing. Remaining contract gaps (elevation, full batch semantics, OS-reserved shortcuts) are explicitly open, not marked complete. CONTEXT.md sync remains gated on user acceptance.
+
+## Selected Visual Direction (2026-09-26, latest override)
+
+User selected the shadcn/ui dashboard reference, with blue accent. Implemented as native WinForms components, not embedded React or a second web runtime. This section supersedes the initial mixed-style revision below.
+
+- Replaced alarm and popup layout, shared borderless frame, neutral graphite palette, blue primary actions, dark owner-drawn table headers/rows, rounded input containers, and geometric close/minimize/plus icons. No native frame is created then swapped in OnLoad; ModernForm starts borderless in its constructor. All application windows center on the cursor monitor's working area on every opening.
+- Autostart is directly in AlarmForm. Removed the tray startup item and deleted the unused legacy SettingsForm. Registry logic now lives in StartupService; the setting is not changed by tests.
+- Each corner has an independent persisted ProcessAction. Defaults preserve old behavior for existing data. Circular controls have centers on the actual rectangle vertices; adjacent selectors choose close/minimize. Global macro switches remain conventional labelled switches.
+- Smoke tests also check borderless state before first show, centering and corner action clone/JSON roundtrip. Rendered alarm, macro window and action editor inspected at current desktop DPI. Physical multi-monitor/high-DPI behavior and final visual acceptance remain manual checks.
+- Existing OS dialogs (file selection and error messages) remain OS dialogs; they are not a second legacy application interface. Existing hotkey and DPAPI limitations described below still apply. Pomodoro is still a separate task.
+
+## Unified Macros Revision (2026-09-26, supersedes earlier UI contracts)
+
+Status: implemented and smoke-tested; pending user acceptance of design and longer background operation.
+
+- One hidden MacroForm replaces the former settings/macros split. Ctrl+Alt+F1 toggles alarm/macros only when one is visible; no internal Ctrl+Alt+F2 binding. User macro routes remain active in tray. Editing temporarily pauses user routes to capture keys safely.
+- Built-in screen-corner macro is migrated once from ProcessRules, including child protection. Four enlarged switches sit in the monitor corners with no abbreviated labels. Upper corners close, lower corners minimize; right corners initially enabled. Trigger is entry into a corner of the primary monitor, not repeated timer execution while resting there.
+- Additional macros have hotkeys, independent close/minimize lists, process picker and optional cmd/PowerShell commands. Actions and text stay in AppState.Macros.Definitions in the shared encrypted config.dat. Old script macros retain enabled scripts; disabling a script preserves its text.
+- MacroActionForm owns editing; MacroForm has compact scrollable cards, so large command fields no longer intercept scrolling of the macro list. Duplicate user shortcuts are rejected.
+- ModernForm and RoundedControls provide custom chrome, gray/blue palette, rounded buttons/cards/toggles. Button alignment and corner-switch feedback incorporated. MP3 signal and running-process picker retained. Autostart is now accessible from the tray menu (existing registry mechanism retained).
+- Background hardening: process actions receive snapshots instead of reading controls on workers; removed redundant mouse hook/settings timer; dispose process handles; bound cross-process minimize messaging; orderly context disposal on exit. These are preventive fixes, NOT proof of the reported crash cause.
+- Validation: `dotnet run --project tests/Smoke/Smoke.csproj -p:PublishSingleFile=false` covers migration/idempotence, disabled-state preservation, DPAPI and repository roundtrips, tray gating, F1 toggle, process-only hotkey route and reusable popup. Tests use their own output-directory config, never the user's release config. Rendering harness also exercised alarm, macro cards and editor.
+- Pending manual acceptance: actual physical hotkeys alongside other apps, elevated process actions, high-DPI/multi-monitor layouts, sustained background use and visual approval. Existing RegisterHotKey limitations remain: OS-reserved combinations cannot all be guaranteed. DPAPI protects disk contents, not against another program running as the same Windows user.
+- Pomodoro remains the separate, unimplemented Agent C task; this revision does not claim to complete it. CONTEXT.md remains the accepted baseline until user confirmation, as required by the documentation protocol.
+
+The sections below retain earlier milestones. Where they mention separate settings, internal F2, mandatory script text or the old card layout, this revision takes precedence.
+
 ## UI and Stability Follow-up (2026-09-26)
 
 Status: implemented, awaiting Windows UI acceptance.
@@ -575,6 +609,17 @@ Status: implemented, awaiting Windows UI acceptance.
 | Integration and documentation sync | Todo | Unassigned | |
 
 ## 14. Definition of Done for the Whole Initiative
+
+### UI refinement and macro window removal, 2026-09-26
+
+- Release 1.3.0: corrected checkbox border pixel geometry so the inner square is centered; added self-contained win-x86 alongside win-x64 to tagged release packaging. Archives explicitly include only TheAlarm.exe.
+
+- Follow-up implemented: compact 9pt bold body text, proportionally smaller windows/buttons, compact aligned tray menu. Process protection is a separate right-hand column; one click on its checkbox toggles it, double-click on the rest of the row toggles it, single-click on the row only selects it. Space remains available for keyboard operation. Caption changed to "Свернуть процессы". Click behavior is covered by native-message smoke tests; final visual acceptance remains with the user.
+
+- Implemented: themed tray menu, bold typography, darker blue accent (#1447e6), larger gaps between sections and captions attached to the following controls.
+- Clarified: hide-first applies to applications targeted by macros, not to closing TheAlarm itself. Removed the unrelated application closing changes.
+- Implemented: minimize all matching target windows (including unprotected descendants) before starting taskkill. Use forced minimization without the former per-window 500 ms message wait. This deliberately keeps surviving windows recoverable from the taskbar if termination fails; it is not permanent SW_HIDE.
+- Pending user acceptance: visual appearance and behavior with actual target applications, including unresponsive/elevated windows. Arbitrary cmd/PowerShell commands are not rewritten.
 
 Инициатива считается завершенной, когда выполнены все условия:
 

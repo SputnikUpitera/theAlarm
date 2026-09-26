@@ -34,7 +34,14 @@ namespace TheAlarm
 			Application.SetCompatibleTextRenderingDefault(false);
 			
 			// Запуск приложения с контекстом трея (без главной формы)
-			try { Application.Run(new TrayAppContext()); }
+			AppLog.Info($"Starting {Application.ProductVersion}; PID {Environment.ProcessId}; executable {Environment.ProcessPath}");
+			try { using var context = new TrayAppContext(); Application.Run(context); }
+			catch (Exception ex)
+			{
+				AppLog.Error("Fatal message-loop failure; shutting down", ex);
+				MessageBox.Show("Приложение завершено из-за ошибки. Подробности: %LOCALAPPDATA%\\TheAlarm\\thealarm.log", "The Alarm");
+				Environment.ExitCode = 1;
+			}
 			finally { instance.ReleaseMutex(); }
 		}
 	}

@@ -14,12 +14,10 @@ namespace TheAlarm
 	{
 		private readonly NotifyIcon _notifyIcon;
 		private readonly AlarmForm _alarmForm;
-		private readonly SettingsForm _settingsForm;
 		private readonly MacroForm _macroForm;
 		private readonly PopupForm _popupForm;
 		private readonly System.Windows.Forms.Timer _alarmTimer;
 		private readonly System.Windows.Forms.Timer _cornerCheckTimer;
-		private readonly LowLevelMouseHook _mouseHook = new LowLevelMouseHook();
 		private readonly GlobalHotkeyWindow _hotkeyWindow;
 		private readonly HotkeyManager _hotkeyManager;
 		private readonly MacroExecutionService _macroExecutionService;
@@ -27,8 +25,8 @@ namespace TheAlarm
 
 		private AppState _appState = new AppState();
 		private bool _isLoadingState;
-		private bool _isProcessingAction;
-		private DateTime _lastCornerActionUtc = DateTime.MinValue;
+		private int _activeCorner = -1;
+		private bool _disposing;
 
 		public TrayAppContext()
 		{
@@ -36,10 +34,9 @@ namespace TheAlarm
 			_stateRepository = new AppStateRepository();
 
 			_alarmForm = new AlarmForm();
-			_settingsForm = new SettingsForm();
 			_macroForm = new MacroForm(_macroExecutionService);
 			_popupForm = new PopupForm();
-			foreach (var form in new Form[] { _alarmForm, _settingsForm, _macroForm, _popupForm }) UiTheme.Apply(form);
+			foreach (var form in new Form[] { _alarmForm, _macroForm, _popupForm }) UiTheme.Apply(form);
 
 			var trayIcon = LoadTrayIcon();
 			_notifyIcon = new NotifyIcon
@@ -52,32 +49,20 @@ namespace TheAlarm
 			_notifyIcon.MouseClick += NotifyIcon_MouseClick;
 
 			_alarmForm.FormClosing += AnyForm_FormClosingToTray;
-			_settingsForm.FormClosing += AnyForm_FormClosingToTray;
 			_macroForm.FormClosing += AnyForm_FormClosingToTray;
 
 			_alarmForm.AlarmsChanged += (_, __) => SaveState();
-			_settingsForm.ConfigurationChanged += (_, __) => SaveState();
 			_macroForm.MacrosChanged += (_, __) => SaveStateAndRefreshMacroHotkeys();
+			_macroForm.RunRequested += macro => RunMacroActions(macro);
 
 			LoadState();
 
 			_hotkeyWindow = new GlobalHotkeyWindow();
 			_hotkeyManager = new HotkeyManager(_hotkeyWindow);
-			_hotkeyManager.SetInternalBindings(new[]
-			{
-				new HotkeyActionBinding
-				{
-					Id = "internal-settings-window",
-					Gesture = new HotkeyGesture(HotkeyModifiers.Control | HotkeyModifiers.Alt, Keys.F1),
-					Handler = ToggleSettingsWindow
-				},
-				new HotkeyActionBinding
-				{
-					Id = "internal-macro-window",
-					Gesture = new HotkeyGesture(HotkeyModifiers.Control | HotkeyModifiers.Alt, Keys.F2),
-					Handler = ToggleMacroWindow
-				}
-			});
+			_alarmForm.VisibleChanged += (_, _) => RefreshWindowHotkey();
+			_macroForm.VisibleChanged += (_, _) => RefreshWindowHotkey();
+			_macroForm.EditorVisibilityChanged += (_, _) => RefreshMacroHotkeys();
+			RefreshWindowHotkey();
 			RefreshMacroHotkeys();
 
 			_alarmTimer = new System.Windows.Forms.Timer { Interval = 1000 };
@@ -88,8 +73,6 @@ namespace TheAlarm
 			_cornerCheckTimer.Tick += CornerCheckTimer_Tick;
 			_cornerCheckTimer.Start();
 
-			_mouseHook.MouseMove += MouseHook_MouseMove;
-			_mouseHook.Start();
 		}
 
 		public class ProcessConfig
@@ -106,9 +89,6 @@ namespace TheAlarm
 				var loadResult = _stateRepository.Load();
 				_appState = loadResult.State.Normalize();
 
-				_settingsForm.LoadConfiguration(
-					ToProcessConfigs(_appState.ProcessRules.CloseProcesses),
-					ToProcessConfigs(_appState.ProcessRules.MinimizeProcesses));
 				_alarmForm.LoadAlarms(_appState.Alarms);
 				_alarmForm.AlarmSoundPath = _appState.AlarmSoundPath;
 				_macroForm.LoadMacros(_appState.Macros.Definitions);
@@ -135,19 +115,16 @@ namespace TheAlarm
 				return;
 			}
 
+			var macros = _macroForm.GetMacros();
 			var newState = new AppState
 			{
 				SchemaVersion = AppState.CurrentSchemaVersion,
-				ProcessRules = new ProcessRulesState
-				{
-					CloseProcesses = ToProcessRules(_settingsForm.GetProcessConfigsForAction(ProcessAction.Close)),
-					MinimizeProcesses = ToProcessRules(_settingsForm.GetProcessConfigsForAction(ProcessAction.Minimize))
-				},
+				ProcessRules = macros.FirstOrDefault(m => m.IsCornerMacro)?.Actions ?? new ProcessRulesState(),
 				Alarms = _alarmForm.GetAlarms(),
 				AlarmSoundPath = _alarmForm.AlarmSoundPath,
 				Macros = new MacroState
 				{
-					Definitions = _macroForm.GetMacros()
+					Definitions = macros
 				},
 				FutureData = _appState.FutureData
 			}.Normalize();
@@ -173,8 +150,10 @@ namespace TheAlarm
 
 		private void RefreshMacroHotkeys()
 		{
+			if (_disposing) return;
 			var macros = _macroForm.GetMacros();
-			var statuses = _hotkeyManager.SetMacroBindings(macros.Select(CreateMacroBinding).ToList());
+			if (_macroForm.IsEditing) macros.Clear();
+			var statuses = _hotkeyManager.SetMacroBindings(macros.Where(m => !m.IsCornerMacro).Select(CreateMacroBinding).ToList());
 			_macroForm.SetRegistrationStatuses(statuses);
 		}
 
@@ -193,17 +172,23 @@ namespace TheAlarm
 
 		private void ExecuteMacro(string macroId)
 		{
-			var macro = _macroForm
-				.GetMacros()
-				.FirstOrDefault(item => string.Equals(item.Id, macroId, StringComparison.OrdinalIgnoreCase));
+			var macro = _macroForm.GetMacro(macroId);
 
 			if (macro == null)
 			{
 				AppLog.Error($"Macro '{macroId}' was requested by hotkey but no longer exists.");
 				return;
 			}
+			if (!macro.IsActive) return;
 
-			if (!_macroExecutionService.TryExecute(macro, out var errorMessage))
+			RunMacroActions(macro);
+		}
+
+		private void RunMacroActions(MacroDefinition macro, ProcessAction? cornerAction = null)
+		{
+			if (cornerAction != ProcessAction.Minimize) PerformProcessAction(ProcessAction.Close, ToProcessConfigs(macro.Actions.CloseProcesses));
+			if (cornerAction != ProcessAction.Close) PerformProcessAction(ProcessAction.Minimize, ToProcessConfigs(macro.Actions.MinimizeProcesses));
+			if (macro.ScriptEnabled == true && !_macroExecutionService.TryExecute(macro, out var errorMessage))
 			{
 				MessageBox.Show(
 					errorMessage ?? "Failed to start macro.",
@@ -315,12 +300,12 @@ namespace TheAlarm
 
 		private ContextMenuStrip BuildContextMenu()
 		{
-			var menu = new ContextMenuStrip();
+			var menu = new ContextMenuStrip { Font = _alarmForm.Font, BackColor = UiTheme.Surface, ForeColor = UiTheme.Text, ShowImageMargin = false, Padding = new Padding(3), Renderer = new ToolStripProfessionalRenderer(new DarkMenuColors()) };
 
-			var openAlarm = new ToolStripMenuItem("Open The Alarm");
+			var openAlarm = new ToolStripMenuItem("Открыть будильник") { Padding = new Padding(6, 3, 6, 3), TextAlign = ContentAlignment.MiddleLeft };
 			openAlarm.Click += (_, __) => ShowAlarm();
 
-			var exit = new ToolStripMenuItem("Exit");
+			var exit = new ToolStripMenuItem("Выйти") { Padding = new Padding(6, 3, 6, 3), TextAlign = ContentAlignment.MiddleLeft };
 			exit.Click += (_, __) => ExitApplication();
 
 			menu.Items.Add(openAlarm);
@@ -339,7 +324,7 @@ namespace TheAlarm
 
 		private void ShowAlarm()
 		{
-			_settingsForm.Hide();
+			if (_macroForm.IsEditing) { _macroForm.Activate(); return; }
 			_macroForm.Hide();
 			_alarmForm.ShowInTaskbar = true;
 			_alarmForm.WindowState = FormWindowState.Normal;
@@ -348,21 +333,9 @@ namespace TheAlarm
 			_alarmForm.Activate();
 		}
 
-		private void ShowSettingsWindow()
-		{
-			_alarmForm.Hide();
-			_macroForm.Hide();
-			_settingsForm.ShowInTaskbar = true;
-			_settingsForm.WindowState = FormWindowState.Normal;
-			_settingsForm.Show();
-			_settingsForm.BringToFront();
-			_settingsForm.Activate();
-		}
-
 		private void ShowMacroWindow()
 		{
 			_alarmForm.Hide();
-			_settingsForm.Hide();
 			_macroForm.ShowInTaskbar = true;
 			_macroForm.WindowState = FormWindowState.Normal;
 			_macroForm.Show();
@@ -370,22 +343,21 @@ namespace TheAlarm
 			_macroForm.Activate();
 		}
 
-		private void ToggleSettingsWindow()
+		private void RefreshWindowHotkey()
 		{
-			if (_settingsForm.Visible)
-			{
-				_settingsForm.Hide();
-				return;
-			}
-
-			ShowSettingsWindow();
+			if (_disposing) return;
+			_hotkeyManager.SetInternalBindings(_alarmForm.Visible || _macroForm.Visible
+				? new[] { new HotkeyActionBinding { Id = "macro-window", Gesture = new HotkeyGesture(HotkeyModifiers.Control | HotkeyModifiers.Alt, Keys.F1), Handler = ToggleMacroWindow } }
+				: Array.Empty<HotkeyActionBinding>());
 		}
 
 		private void ToggleMacroWindow()
 		{
+			if (_macroForm.IsEditing) return;
+			if (!_macroForm.Visible && (!_alarmForm.Visible || _alarmForm.WindowState == FormWindowState.Minimized)) return;
 			if (_macroForm.Visible)
 			{
-				_macroForm.Hide();
+				ShowAlarm();
 				return;
 			}
 
@@ -395,74 +367,44 @@ namespace TheAlarm
 		private void AlarmTimer_Tick(object? sender, EventArgs e)
 		{
 			var due = _alarmForm.ConsumeDueAlarms();
-			if (due.Count > 0) AlarmAudio.Play(_alarmForm.AlarmSoundPath);
-			foreach (var message in due)
-			{
-				_popupForm.SetMessage(message);
-				_popupForm.Show();
-				_popupForm.Activate();
-			}
+			if (due.Count == 0) return;
+			AlarmAudio.Play(_alarmForm.AlarmSoundPath);
+			_popupForm.SetMessage(string.Join(Environment.NewLine + Environment.NewLine, due));
+			_popupForm.Show();
+			_popupForm.Activate();
 		}
 
 		private void CornerCheckTimer_Tick(object? sender, EventArgs e)
 		{
-			if (_mouseHook == null)
-			{
-				return;
-			}
-
-			GetCursorPos(out var point);
-			CheckCornersAndAct(point.X, point.Y);
-		}
-
-		private void MouseHook_MouseMove(int x, int y)
-		{
-			CheckCornersAndAct(x, y);
+			if (GetCursorPos(out var point)) CheckCornersAndAct(point.X, point.Y);
 		}
 
 		private void CheckCornersAndAct(int x, int y)
 		{
-			var screenW = GetSystemMetrics(SM_CXSCREEN);
-			var screenH = GetSystemMetrics(SM_CYSCREEN);
-
-			const int margin = 2;
-			var rightThreshold = screenW - 1 - margin;
-			var topBand = 1 + margin;
-			var bottomThreshold = screenH - 1 - margin;
-			var rightOfThreshold = x > rightThreshold;
-
-			if (rightOfThreshold && y < topBand)
+			var bounds = Screen.PrimaryScreen?.Bounds ?? Rectangle.Empty;
+			int corner = -1;
+			if (bounds.Contains(x, y))
 			{
-				PerformProcessAction(ProcessAction.Close);
-				return;
+				bool left = x < bounds.Left + 3, right = x >= bounds.Right - 3;
+				bool top = y < bounds.Top + 3, bottom = y >= bounds.Bottom - 3;
+				corner = top && left ? 0 : top && right ? 1 : bottom && left ? 2 : bottom && right ? 3 : -1;
 			}
-
-			if (rightOfThreshold && y > bottomThreshold)
-			{
-				PerformProcessAction(ProcessAction.Minimize);
-			}
+			if (corner == _activeCorner) return;
+			_activeCorner = corner;
+			if (corner < 0) return;
+			var macro = _macroForm.GetActiveCornerMacro();
+			if (macro == null) return;
+			bool enabled = corner switch { 0 => macro.TopLeft, 1 => macro.TopRight, 2 => macro.BottomLeft, _ => macro.BottomRight };
+			if (enabled) RunMacroActions(macro, macro.GetCornerAction(corner));
 		}
 
-		private void PerformProcessAction(ProcessAction action)
+		private void PerformProcessAction(ProcessAction action, List<ProcessConfig> targets)
 		{
-			var nowUtc = DateTime.UtcNow;
-			if ((nowUtc - _lastCornerActionUtc).TotalMilliseconds < 250)
-			{
-				return;
-			}
-
-			_lastCornerActionUtc = nowUtc;
-			if (_isProcessingAction)
-			{
-				return;
-			}
-
-			_isProcessingAction = true;
+			if (targets.Count == 0) return;
 			Task.Run(() =>
 			{
 				try
 				{
-					var targets = _settingsForm.GetProcessConfigsForAction(action);
 					if (targets.Count == 0)
 					{
 						return;
@@ -474,6 +416,22 @@ namespace TheAlarm
 						.Distinct(StringComparer.OrdinalIgnoreCase)
 						.ToList();
 
+					var descendants = targets.Any(t => !t.ProtectChildren) ? BuildChildProcessLookup() : new Dictionary<int, List<int>>();
+					// Remove all target windows from view before waiting for any process termination.
+					var prepared = new HashSet<int>();
+					foreach (var target in targets)
+					{
+						foreach (var process in Process.GetProcessesByName(NormalizeProcessName(target.Name)))
+						{
+							using (process)
+							{
+								var ids = target.ProtectChildren ? new HashSet<int> { process.Id } : GetProcessIdsWithDescendants(process.Id, descendants);
+								foreach (var id in ids)
+									if (prepared.Add(id)) TryMinimizeProcessWindows(id);
+							}
+						}
+					}
+					if (action == ProcessAction.Minimize) return;
 					foreach (var processName in processNames)
 					{
 						Process[] processes = Array.Empty<Process>();
@@ -495,121 +453,48 @@ namespace TheAlarm
 
 						if (action == ProcessAction.Close)
 						{
+							foreach (var process in processes) process.Dispose();
 							if (processConfig?.ProtectChildren == true)
 							{
-								TryTaskKillNoChildrenAsync(processName);
+								TryTaskKill(processName, false);
 							}
 							else
 							{
-								TryTaskKillAsync(processName);
+								TryTaskKill(processName, true);
 							}
 
 							continue;
 						}
 
-						foreach (var process in processes)
-						{
-							try
-							{
-								var processIdsToMinimize = processConfig?.ProtectChildren == true
-									? new HashSet<int> { process.Id }
-									: GetProcessIdsWithDescendants(process.Id);
-
-								foreach (var processId in processIdsToMinimize)
-								{
-									TryMinimizeProcessWindows(processId);
-								}
-							}
-							catch
-							{
-							}
-							finally
-							{
-								try
-								{
-									process.Dispose();
-								}
-								catch
-								{
-								}
-							}
-						}
 					}
 				}
-				finally
-				{
-					_isProcessingAction = false;
-				}
+				catch (Exception ex) { AppLog.Error("Process macro failed", ex); }
 			});
 		}
 
-		private static void TryTaskKillAsync(string processBaseName)
+		private static void TryTaskKill(string processBaseName, bool includeChildren)
 		{
-			Task.Run(() =>
+			try
 			{
-				try
-				{
-					var startInfo = new ProcessStartInfo("taskkill", $"/IM {processBaseName}.exe /F /T")
-					{
-						CreateNoWindow = true,
-						UseShellExecute = false,
-						WindowStyle = ProcessWindowStyle.Hidden,
-						RedirectStandardError = true,
-						RedirectStandardOutput = true
-					};
-					using var process = Process.Start(startInfo);
-					process?.WaitForExit(1000);
-				}
-				catch
-				{
-				}
-			});
-		}
-
-		private static void TryTaskKillNoChildrenAsync(string processBaseName)
-		{
-			Task.Run(() =>
-			{
-				try
-				{
-					var startInfo = new ProcessStartInfo("taskkill", $"/IM {processBaseName}.exe /F")
-					{
-						CreateNoWindow = true,
-						UseShellExecute = false,
-						WindowStyle = ProcessWindowStyle.Hidden,
-						RedirectStandardError = true,
-						RedirectStandardOutput = true
-					};
-					using var process = Process.Start(startInfo);
-					process?.WaitForExit(1000);
-				}
-				catch
-				{
-				}
-			});
+				using var process = Process.Start(BuildTaskKillStartInfo(processBaseName, includeChildren));
+				if (process == null) { AppLog.Error("taskkill did not start."); return; }
+				if (!process.WaitForExit(1000)) AppLog.Info("taskkill is still running after one second.");
+				else if (process.ExitCode != 0) AppLog.Error($"taskkill returned exit code {process.ExitCode}.");
+			}
+			catch (Exception ex) { AppLog.Error("Unable to run taskkill.", ex); }
 		}
 
 		private static string NormalizeProcessName(string input)
 		{
-			var value = (input ?? string.Empty).Trim().Trim('"');
-			if (value.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
-			{
-				value = value.Substring(0, value.Length - 4);
-			}
+			return ProcessRule.NormalizeName(input);
+		}
 
-			try
-			{
-				var fileName = Path.GetFileNameWithoutExtension(value);
-				if (!string.IsNullOrEmpty(fileName))
-				{
-					return fileName;
-				}
-			}
-			catch
-			{
-			}
-
-			return value;
+		internal static ProcessStartInfo BuildTaskKillStartInfo(string name, bool includeChildren)
+		{
+			var info = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "taskkill.exe")) { UseShellExecute = false, CreateNoWindow = true, WindowStyle = ProcessWindowStyle.Hidden };
+			info.ArgumentList.Add("/IM"); info.ArgumentList.Add(ProcessRule.NormalizeName(name) + ".exe"); info.ArgumentList.Add("/F");
+			if (includeChildren) info.ArgumentList.Add("/T");
+			return info;
 		}
 
 		private static void EnumThreadWindowsForProcess(Process process, Func<IntPtr, bool> onWindow)
@@ -641,6 +526,7 @@ namespace TheAlarm
 				catch
 				{
 				}
+				finally { thread.Dispose(); }
 			}
 		}
 
@@ -656,7 +542,7 @@ namespace TheAlarm
 						return true;
 					}
 
-					SendMessage(hWnd, WM_SYSCOMMAND, (IntPtr)SC_MINIMIZE, IntPtr.Zero);
+					// Force minimization without waiting for the target application's message loop.
 					ShowWindow(hWnd, SW_FORCEMINIMIZE);
 					return true;
 				});
@@ -666,10 +552,9 @@ namespace TheAlarm
 			}
 		}
 
-		private static HashSet<int> GetProcessIdsWithDescendants(int rootProcessId)
+		private static HashSet<int> GetProcessIdsWithDescendants(int rootProcessId, Dictionary<int, List<int>> childrenByParent)
 		{
 			var result = new HashSet<int> { rootProcessId };
-			var childrenByParent = BuildChildProcessLookup();
 			var queue = new Queue<int>();
 			queue.Enqueue(rootProcessId);
 
@@ -732,6 +617,7 @@ namespace TheAlarm
 
 		private void AnyForm_FormClosingToTray(object? sender, FormClosingEventArgs e)
 		{
+			if (_disposing || e.CloseReason != CloseReason.UserClosing) return;
 			e.Cancel = true;
 			(sender as Form)?.Hide();
 		}
@@ -739,24 +625,24 @@ namespace TheAlarm
 		private void ExitApplication()
 		{
 			SaveState();
-			_notifyIcon.Visible = false;
-			_hotkeyManager.Dispose();
-			_hotkeyWindow.Dispose();
-			Environment.Exit(0);
+			ExitThread();
 		}
 
 		protected override void Dispose(bool disposing)
 		{
-			if (disposing)
+			if (disposing && !_disposing)
 			{
+				_disposing = true;
+				var menu = _notifyIcon.ContextMenuStrip;
+				var icon = _notifyIcon.Icon;
 				_notifyIcon.Dispose();
+				menu?.Dispose(); icon?.Dispose();
+				AlarmAudio.Stop();
 				_alarmTimer.Dispose();
 				_cornerCheckTimer.Dispose();
 				_hotkeyManager.Dispose();
 				_hotkeyWindow.Dispose();
-				_mouseHook.Dispose();
 				_alarmForm.Dispose();
-				_settingsForm.Dispose();
 				_macroForm.Dispose();
 				_popupForm.Dispose();
 			}
@@ -769,6 +655,9 @@ namespace TheAlarm
 
 		[DllImport("user32.dll")]
 		private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+
+		[DllImport("user32.dll", SetLastError = true)]
+		private static extern IntPtr SendMessageTimeout(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam, uint flags, uint timeout, out IntPtr result);
 
 		[DllImport("user32.dll")]
 		private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);

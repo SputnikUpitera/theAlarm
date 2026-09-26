@@ -4,36 +4,45 @@ using System.Windows.Forms;
 
 namespace TheAlarm;
 
-internal sealed class ProcessPickerForm : Form
+internal sealed class ProcessPickerForm : ModernForm
 {
-    private readonly ListView _list = new() { Dock = DockStyle.Fill, View = View.Details, CheckBoxes = true, FullRowSelect = true, HideSelection = false, AccessibleName = "Running processes" };
-    private readonly TextBox _search = new() { Dock = DockStyle.Top, PlaceholderText = "Search process or window title", AccessibleName = "Search processes" };
+    private readonly DarkListView _list = new() { Dock = DockStyle.Fill, CheckBoxes = true, AccessibleName = "Запущенные процессы" };
+    private readonly InputBox _search = new() { Dock = DockStyle.Top, Height = 34 };
     private readonly List<(string Name, int Id, string Title)> _snapshot = new();
-    public IEnumerable<string> SelectedNames => _list.CheckedItems.Cast<ListViewItem>().Select(item => item.Text).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+    private readonly HashSet<string> _selected = new(StringComparer.OrdinalIgnoreCase);
+    private bool _rendering;
+    public IEnumerable<string> SelectedNames => _selected.ToArray();
 
     public ProcessPickerForm()
     {
-        Text = "Select running processes";
-        ClientSize = new Size(720, 480);
-        MinimumSize = new Size(560, 360);
-        StartPosition = FormStartPosition.CenterParent;
-        _list.Columns.Add("Process", 200);
-        _list.Columns.Add("PID", 80);
-        _list.Columns.Add("Window", 390);
-        var actions = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 52, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(8) };
-        var add = new Button { Text = "Add selected", AutoSize = true, DialogResult = DialogResult.OK };
-        var refresh = new Button { Text = "Refresh", AutoSize = true };
-        var cancel = new Button { Text = "Cancel", AutoSize = true, DialogResult = DialogResult.Cancel };
+        Text = "Запущенные процессы";
+        ClientSize = new Size(640, 464);
+        MinimumSize = new Size(448, 288);
+        _search.Editor.PlaceholderText = "Поиск процесса или названия окна";
+        _list.Columns.Add("Процесс", 192);
+        _list.Columns.Add("PID", 86);
+        _list.Columns.Add("Окно", 312);
+        var actions = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 48, FlowDirection = FlowDirection.RightToLeft, WrapContents = false, Padding = new Padding(6) };
+        var add = new RoundedButton { Text = "Добавить", Primary = true, Size = new Size(112, 29), DialogResult = DialogResult.OK };
+        var refresh = new RoundedButton { Text = "Обновить", Size = new Size(112, 29) };
+        var cancel = new RoundedButton { Text = "Отмена", Size = new Size(112, 29), DialogResult = DialogResult.Cancel };
         actions.Controls.Add(add);
         actions.Controls.Add(cancel);
         actions.Controls.Add(refresh);
-        Controls.Add(_list);
-        Controls.Add(_search);
-        Controls.Add(actions);
+        var body = new Panel { Dock = DockStyle.Fill, Padding = new Padding(19) };
+        body.Controls.Add(_list); body.Controls.Add(_search); body.Controls.Add(actions); Controls.Add(body);
         AcceptButton = add;
         CancelButton = cancel;
         refresh.Click += (_, __) => RefreshProcesses();
-        _search.TextChanged += (_, __) => Render();
+        _search.Editor.TextChanged += (_, __) => Render();
+        _list.ItemChecked += (_, e) =>
+        {
+            if (_rendering || e.Item == null || _list.Disposing || _list.IsDisposed) return;
+            if (e.Item.Checked) _selected.Add(e.Item.Text); else _selected.Remove(e.Item.Text);
+            _rendering = true;
+            try { foreach (ListViewItem? item in _list.Items) if (item != null && item.Text.Equals(e.Item.Text, StringComparison.OrdinalIgnoreCase)) item.Checked = e.Item.Checked; }
+            finally { _rendering = false; }
+        };
         RefreshProcesses();
         UiTheme.Apply(this);
     }
@@ -41,7 +50,11 @@ internal sealed class ProcessPickerForm : Form
     private void RefreshProcesses()
     {
         _snapshot.Clear();
-        foreach (var process in Process.GetProcesses())
+        Process[] processes;
+        try { processes = Process.GetProcesses(); }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
+        { AppLog.Error("Unable to enumerate running processes", ex); Render(); return; }
+        foreach (var process in processes)
         {
             using (process)
             {
@@ -55,14 +68,15 @@ internal sealed class ProcessPickerForm : Form
 
     private void Render()
     {
+        _rendering = true;
         _list.BeginUpdate();
         try
         {
             _list.Items.Clear();
             foreach (var p in _snapshot.OrderBy(p => p.Name).ThenBy(p => p.Id))
-                if (p.Name.Contains(_search.Text, StringComparison.OrdinalIgnoreCase) || p.Title.Contains(_search.Text, StringComparison.OrdinalIgnoreCase))
-                    _list.Items.Add(new ListViewItem(new[] { p.Name, p.Id.ToString(), p.Title }));
+                if (p.Name.Contains(_search.Editor.Text, StringComparison.OrdinalIgnoreCase) || p.Title.Contains(_search.Editor.Text, StringComparison.OrdinalIgnoreCase))
+                    _list.Items.Add(new ListViewItem(new[] { p.Name, p.Id.ToString(), p.Title }) { Checked = _selected.Contains(p.Name) });
         }
-        finally { _list.EndUpdate(); }
+        finally { _list.EndUpdate(); _rendering = false; }
     }
 }

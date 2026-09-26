@@ -65,7 +65,9 @@ namespace TheAlarm
 			Keys.LShiftKey,
 			Keys.RShiftKey,
 			Keys.LMenu,
-			Keys.RMenu
+			Keys.RMenu,
+			Keys.LWin,
+			Keys.RWin
 		};
 
 		public static bool TryParse(MacroHotkey? hotkey, out HotkeyGesture gesture)
@@ -162,7 +164,7 @@ namespace TheAlarm
 				modifiers |= HotkeyModifiers.Shift;
 			}
 
-			if ((Control.ModifierKeys & Keys.LWin) == Keys.LWin || (Control.ModifierKeys & Keys.RWin) == Keys.RWin)
+			if ((GetKeyState((int)Keys.LWin) & 0x8000) != 0 || (GetKeyState((int)Keys.RWin) & 0x8000) != 0)
 			{
 				modifiers |= HotkeyModifiers.Windows;
 			}
@@ -221,8 +223,11 @@ namespace TheAlarm
 				return false;
 			}
 
-			return !InvalidKeys.Contains(key);
+			return (int)key > 0 && (int)key <= 0xFF && Enum.IsDefined(key) && !InvalidKeys.Contains(key);
 		}
+
+		[System.Runtime.InteropServices.DllImport("user32.dll")]
+		private static extern short GetKeyState(int key);
 
 		private static string SerializeModifiers(HotkeyModifiers modifiers)
 		{
@@ -319,12 +324,6 @@ namespace TheAlarm
 
 				if (!macro.IsActive)
 				{
-					continue;
-				}
-
-				if (string.IsNullOrWhiteSpace(macro.ScriptText))
-				{
-					_macroStatuses[macro.MacroId] = "Active macro requires script text.";
 					continue;
 				}
 

@@ -1,337 +1,90 @@
-using System;
-using System.Drawing;
-using System.Windows.Forms;
-using System.Collections.Generic;
+using System.Globalization;
+namespace TheAlarm;
 
-namespace TheAlarm
+public sealed class AlarmForm : ModernForm
 {
-	// Форма для управления будильниками
-	public partial class AlarmForm : Form
-	{
-		public string AlarmSoundPath { get; set; } = string.Empty;
-		// Событие для запроса показа всплывающего окна
-		public event EventHandler? AlarmsChanged;
-
-		// Список всех установленных будильников
-		private readonly List<AlarmState> _alarms = new List<AlarmState>();
-		
-		// Элементы управления формы
-		private readonly DateTimePicker _timePicker;     // Выбор времени
-		private readonly DateTimePicker _datePicker;     // Выбор даты
-		private readonly CheckBox _dailyCheckbox;        // Чекбокс ежедневного будильника
-		private readonly TextBox _messageBox;            // Ввод сообщения
-		private readonly Button _setButton;              // Кнопка установки будильника
-		private readonly ListView _alarmListView;        // Список установленных будильников
-		private readonly Button _deleteSelectedButton;   // Кнопка удаления выбранного будильника
-
-		// Цвета темной темы (как в Cursor)
-		private static readonly Color DarkBackground = Color.FromArgb(30, 30, 30);
-		private static readonly Color DarkControl = Color.FromArgb(45, 45, 45);
-		private static readonly Color DarkBorder = Color.FromArgb(60, 60, 60);
-		private static readonly Color LightText = Color.FromArgb(220, 220, 220);
-		private static readonly Color AccentBlue = Color.FromArgb(0, 122, 204);
-
-		public AlarmForm()
-		{
-			Text = "The Alarm";
-			FormBorderStyle = FormBorderStyle.FixedDialog;
-			StartPosition = FormStartPosition.CenterScreen;
-			MaximizeBox = false;
-			MinimizeBox = false;
-			Width = 560;
-			Height = 420;
-			
-			// Применение темной темы к форме
-			BackColor = DarkBackground;
-			ForeColor = LightText;
-
-			// Отступ от краев окна
-			const int margin = 15;
-
-			// Элемент выбора времени
-			_timePicker = new DateTimePicker
-			{
-				Format = DateTimePickerFormat.Time,
-				ShowUpDown = true,
-				Left = margin,
-				Top = margin,
-				Width = 120,
-				BackColor = DarkControl,
-				ForeColor = LightText
-			};
-			
-			// Элемент выбора даты
-			_datePicker = new DateTimePicker
-			{
-				Format = DateTimePickerFormat.Short,
-				Left = margin + 130, // Смещение относительно времени
-				Top = margin,
-				Width = 120,
-				BackColor = DarkControl,
-				ForeColor = LightText
-			};
-			_datePicker.Value = DateTime.Now; // Устанавливаем текущую дату
-
-			// Чекбокс ежедневного будильника
-			_dailyCheckbox = new CheckBox
-			{
-				Text = "Daily",
-				Left = margin + 260, // Смещение относительно времени
-				Top = margin,
-				Width = 100,
-				BackColor = DarkControl,
-				ForeColor = LightText
-			};
-			_dailyCheckbox.Checked = true; // По умолчанию включен
-
-			// Поле ввода сообщения будильника
-			_messageBox = new TextBox
-			{
-				Left = margin,
-				Top = margin + 40,
-				Width = Width - margin * 3,  // Отступ справа
-				BackColor = DarkControl,
-				ForeColor = LightText,
-				BorderStyle = BorderStyle.FixedSingle
-			};
-			
-			// Кнопка установки будильника
-			_setButton = new Button
-			{
-				Text = "Set Alarm",
-				Left = margin,
-				Top = margin + 80,
-				Width = 120,
-				BackColor = AccentBlue,
-				ForeColor = Color.White,
-				FlatStyle = FlatStyle.Flat
-			};
-			_setButton.FlatAppearance.BorderColor = AccentBlue;
-			
-			// Обработчик нажатия кнопки "Set Alarm"
-			_setButton.Click += (_, __) =>
-			{
-				var now = DateTime.Now;
-				var t = _timePicker.Value;
-				var d = _datePicker.Value;
-				
-				// Создаем дату/время будильника на основе выбранной даты и времени
-				var candidate = new DateTime(d.Year, d.Month, d.Day, t.Hour, t.Minute, t.Second);
-				
-				// Если время уже прошло сегодня, переносим на завтра
-				if (candidate <= now) candidate = candidate.AddDays(1);
-				
-				var msg = _messageBox.Text ?? string.Empty;
-				var isDaily = _dailyCheckbox.Checked;
-				
-				// Добавляем будильник в список
-				_alarms.Add(new AlarmState {
-					TimeUtc = candidate.ToUniversalTime(), 
-					Message = msg,
-					IsDaily = isDaily
-				});
-				RefreshAlarmList();
-				OnAlarmsChanged();
-			};
-
-			Controls.Add(_timePicker);
-			Controls.Add(_datePicker);
-			Controls.Add(_dailyCheckbox);
-			Controls.Add(_messageBox);
-			Controls.Add(_setButton);
-
-			// Список установленных будильников (таблица с двумя колонками)
-			_alarmListView = new ListView
-			{
-				Left = margin,
-				Top = margin + 120,
-				Width = Width - margin * 3,  // Отступ справа
-				Height = 200,
-				View = View.Details,
-				FullRowSelect = true,
-				HideSelection = false,
-				BackColor = DarkControl,
-				ForeColor = LightText,
-				BorderStyle = BorderStyle.FixedSingle
-			};
-			_alarmListView.Columns.Add("Time", 180);
-			_alarmListView.Columns.Add("Message", Width - margin * 3 - 260);  // Динамическая ширина
-			_alarmListView.Columns.Add("Type", 80);  // Колонка для типа будильника
-			
-			// Кнопка удаления выбранного будильника
-			_deleteSelectedButton = new Button
-			{
-				Text = "Delete Selected",
-				Left = Width - margin - 155,  // Отступ справа
-				Top = Height - margin - 60,   // Отступ снизу
-				Width = 140,
-				BackColor = DarkControl,
-				ForeColor = LightText,
-				FlatStyle = FlatStyle.Flat
-			};
-			_deleteSelectedButton.FlatAppearance.BorderColor = DarkBorder;
-			
-			// Обработчик удаления будильника
-			_deleteSelectedButton.Click += (_, __) =>
-			{
-				if (_alarmListView.SelectedItems.Count == 0) return;
-				
-				foreach (ListViewItem item in _alarmListView.SelectedItems)
-				{
-					if (item.Tag is AlarmState ai)
-					{
-						_alarms.Remove(ai);
-					}
-				}
-				RefreshAlarmList();
-				OnAlarmsChanged();
-			};
-			
-			Controls.Add(_alarmListView);
-			Controls.Add(_deleteSelectedButton);
-			var soundButton = new Button { Text = "Choose MP3 signal...", Left = 15, Top = 370, Width = 190, Height = 32 };
-			var previewSound = new Button { Text = "Preview", Left = 355, Top = 370, Width = 85, Height = 32 };
-			previewSound.Click += (_, __) => AlarmAudio.Play(AlarmSoundPath);
-			var stopSound = new Button { Text = "Stop", Left = 445, Top = 370, Width = 70, Height = 32 };
-			stopSound.Click += (_, __) => AlarmAudio.Stop();
-			Controls.Add(previewSound);
-			Controls.Add(stopSound);
-			var resetSound = new Button { Text = "Default signal", Left = 215, Top = 370, Width = 130, Height = 32 };
-			soundButton.Click += (_, __) =>
-			{
-				using var dialog = new OpenFileDialog { Filter = "MP3 audio (*.mp3)|*.mp3", CheckFileExists = true };
-				if (dialog.ShowDialog(this) != DialogResult.OK) return;
-				AlarmSoundPath = dialog.FileName;
-				OnAlarmsChanged();
-			};
-			resetSound.Click += (_, __) => { AlarmSoundPath = string.Empty; OnAlarmsChanged(); };
-			Controls.Add(soundButton);
-			Controls.Add(resetSound);
-			ClientSize = new Size(ClientSize.Width, 420);
-		}
-
-		// Получение и удаление всех сработавших будильников
-		public List<string> ConsumeDueAlarms()
-		{
-			var nowUtc = DateTime.UtcNow;
-			var due = new List<AlarmState>();
-			var dailyAlarms = new List<AlarmState>();
-			
-			// Находим все будильники, чье время уже наступило
-			foreach (var a in _alarms)
-			{
-				if (nowUtc >= a.TimeUtc)
-				{
-					if (a.IsDaily)
-					{
-						// Для ежедневных будильников переносим на следующий день
-						dailyAlarms.Add(a);
-					}
-					else
-					{
-						// Для одноразовых будильников добавляем в список для удаления
-						due.Add(a);
-					}
-				}
-			}
-			
-			if (due.Count == 0 && dailyAlarms.Count == 0) return new List<string>();
-			
-			// Удаляем сработавшие одноразовые будильники из списка
-			foreach (var a in due) _alarms.Remove(a);
-			
-			// Переносим ежедневные будильники на следующий день
-			foreach (var a in dailyAlarms)
-			{
-				// Удаляем старый будильник
-				_alarms.Remove(a);
-				// Добавляем новый на следующий день
-				_alarms.Add(new AlarmState {
-					TimeUtc = a.TimeUtc.AddDays(1), 
-					Message = a.Message,
-					IsDaily = true
-				});
-			}
-			
-			RefreshAlarmList();
-			OnAlarmsChanged();
-			
-			// Возвращаем список сообщений
-			var messages = new List<string>();
-			foreach (var a in due) messages.Add(a.Message);
-			foreach (var a in dailyAlarms) messages.Add(a.Message);
-			return messages;
-		}
-
-		// Загрузка списка будильников из файла
-		public void LoadAlarms(List<AlarmState> alarms)
-		{
-			_alarms.Clear();
-			foreach (var alarm in alarms)
-			{
-				if (alarm == null)
-				{
-					continue;
-				}
-
-				_alarms.Add(alarm.Clone().Normalize());
-			}
-			RefreshAlarmList();
-		}
-
-		// Получение списка будильников для сохранения
-		public List<AlarmState> GetAlarms()
-		{
-			var alarms = new List<AlarmState>();
-			foreach (var alarm in _alarms)
-			{
-				alarms.Add(alarm.Clone().Normalize());
-			}
-
-			return alarms;
-		}
-
-		// Обновление отображения списка будильников
-		private void RefreshAlarmList()
-		{
-			_alarmListView.Items.Clear();
-			
-			foreach (var a in _alarms)
-			{
-				// Преобразуем время из UTC в локальное для отображения
-				var localTime = a.TimeUtc.ToLocalTime();
-				var item = new ListViewItem(new[] { 
-					localTime.ToString("yyyy-MM-dd HH:mm:ss"), 
-					a.Message,
-					a.IsDaily ? "Daily" : "Once"
-				}) { Tag = a };
-				_alarmListView.Items.Add(item);
-			}
-			
-			// Показываем список только если есть будильники
-			_alarmListView.Visible = _alarms.Count > 0;
-			_deleteSelectedButton.Visible = _alarms.Count > 0;
-		}
-
-		private void OnAlarmsChanged()
-		{
-			AlarmsChanged?.Invoke(this, EventArgs.Empty);
-		}
-
-		// Освобождение ресурсов формы
-		protected override void Dispose(bool disposing)
-		{
-			if (disposing)
-			{
-				_timePicker.Dispose();
-				_datePicker.Dispose();
-				_dailyCheckbox.Dispose();
-				_messageBox.Dispose();
-				_setButton.Dispose();
-				_alarmListView.Dispose();
-				_deleteSelectedButton.Dispose();
-			}
-			base.Dispose(disposing);
-		}
-	}
+    public string AlarmSoundPath { get; set; } = string.Empty;
+    public event EventHandler? AlarmsChanged;
+    private readonly List<AlarmState> _alarms = new();
+    private readonly DarkListView _list = new() { Dock = DockStyle.Fill };
+    private readonly Label _empty = new() { Text = "Пока нет будильников\nДобавьте время и сообщение выше", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter };
+    public AlarmForm()
+    {
+        Text = "The Alarm"; ClientSize = new Size(736, 648); MinimumSize = new Size(672, 592);
+        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(22, 18, 22, 19), ColumnCount = 1, RowCount = 7 };
+        foreach (var h in new[] { 56, 115, 43 }) layout.RowStyles.Add(new RowStyle(SizeType.Absolute, h));
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        foreach (var h in new[] { 38, 85, 45 }) layout.RowStyles.Add(new RowStyle(SizeType.Absolute, h));
+        layout.Controls.Add(UiTheme.Heading("Будильники"), 0, 0);
+        var create = new MacroCard { Dock = DockStyle.Fill, Padding = new Padding(13), Margin = new Padding(0, 0, 0, 10) };
+        var fields = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 4, RowCount = 2 };
+        fields.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 90)); fields.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 128)); fields.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); fields.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120));
+        fields.RowStyles.Add(new RowStyle(SizeType.Absolute, 37)); fields.RowStyles.Add(new RowStyle(SizeType.Absolute, 37));
+        var time = new InputBox { Dock = DockStyle.Fill, Margin = new Padding(0, 0, 8, 5) }; time.Editor.Text = DateTime.Now.ToString("HH:mm"); time.Editor.AccessibleName = "Время, часы и минуты";
+        var date = new InputBox { Dock = DockStyle.Fill, Margin = new Padding(0, 0, 8, 5) }; date.Editor.Text = DateTime.Today.ToString("dd.MM.yyyy"); date.Editor.AccessibleName = "Дата, день месяц год";
+        var daily = new ToggleSwitch { Text = "Ежедневно", Checked = true, Dock = DockStyle.Fill };
+        var message = new InputBox { Dock = DockStyle.Fill, Margin = new Padding(0, 0, 8, 5) }; message.Editor.PlaceholderText = "О чём напомнить?";
+        var add = new RoundedButton { Text = "Добавить", Primary = true, Dock = DockStyle.Fill, Margin = new Padding(0, 0, 0, 5) };
+        fields.Controls.Add(time, 0, 0); fields.Controls.Add(date, 1, 0); fields.Controls.Add(daily, 2, 0);
+        fields.Controls.Add(message, 0, 1); fields.SetColumnSpan(message, 3); fields.Controls.Add(add, 3, 1);
+        create.Controls.Add(fields); layout.Controls.Add(create, 0, 1);
+        add.Click += (_, _) =>
+        {
+            if (!TimeSpan.TryParseExact(time.Editor.Text, new[] { @"h\:mm", @"hh\:mm", @"hh\:mm\:ss" }, CultureInfo.InvariantCulture, out var t) || t.TotalHours >= 24 ||
+                !DateTime.TryParseExact(date.Editor.Text, "dd.MM.yyyy", CultureInfo.InvariantCulture, DateTimeStyles.None, out var d))
+            { MessageBox.Show(this, "Введите время ЧЧ:ММ и дату ДД.ММ.ГГГГ.", "Будильник"); return; }
+            var candidate = (daily.Checked ? DateTime.Today : d.Date).Add(t);
+            if (daily.Checked && candidate <= DateTime.Now) candidate = candidate.AddDays(1);
+            if (!daily.Checked && candidate <= DateTime.Now) { MessageBox.Show(this, "Выберите будущее время.", "Будильник"); return; }
+            _alarms.Add(new AlarmState { TimeUtc = candidate.ToUniversalTime(), Message = message.Editor.Text, IsDaily = daily.Checked });
+            RefreshAlarms(); AlarmsChanged?.Invoke(this, EventArgs.Empty);
+        };
+        layout.Controls.Add(UiTheme.Caption("РАСПИСАНИЕ"), 0, 2);
+        _list.Columns.Add("Время", 168); _list.Columns.Add("Сообщение", 312); _list.Columns.Add("Повтор", 104);
+        var table = new MacroCard { Dock = DockStyle.Fill, Padding = new Padding(6), Margin = Padding.Empty };
+        table.Controls.Add(_list); table.Controls.Add(_empty); layout.Controls.Add(table, 0, 3);
+        var remove = new RoundedButton { Text = "Удалить выбранные", Width = 184, Height = 29, Anchor = AnchorStyles.Right, Margin = new Padding(0, 6, 0, 3) };
+        remove.Click += (_, _) => { foreach (ListViewItem item in _list.SelectedItems) _alarms.Remove((AlarmState)item.Tag!); RefreshAlarms(); AlarmsChanged?.Invoke(this, EventArgs.Empty); };
+        layout.Controls.Add(remove, 0, 4);
+        var soundSection = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 2, ColumnCount = 1, Margin = new Padding(0, 16, 0, 0) };
+        soundSection.RowStyles.Add(new RowStyle(SizeType.Absolute, 22)); soundSection.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        soundSection.Controls.Add(UiTheme.Caption("Сигнал будильника"), 0, 0);
+        var audio = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Margin = Padding.Empty };
+        var choose = new RoundedButton { Text = "Загрузить MP3", Width = 136, Height = 30 };
+        var reset = new RoundedButton { Text = "Стандартный сигнал", Width = 184, Height = 30 };
+        var play = new RoundedButton { Text = "Слушать", Width = 88, Height = 30 };
+        var stop = new RoundedButton { Text = "Стоп", Width = 72, Height = 30 };
+        choose.Click += (_, _) => { using var dialog = new OpenFileDialog { Filter = "MP3 (*.mp3)|*.mp3", CheckFileExists = true }; if (dialog.ShowDialog(this) == DialogResult.OK) { AlarmSoundPath = dialog.FileName; AlarmsChanged?.Invoke(this, EventArgs.Empty); } };
+        reset.Click += (_, _) => { AlarmSoundPath = string.Empty; AlarmsChanged?.Invoke(this, EventArgs.Empty); };
+        play.Click += (_, _) => AlarmAudio.Play(AlarmSoundPath); stop.Click += (_, _) => AlarmAudio.Stop();
+        audio.Controls.AddRange(new Control[] { choose, reset, play, stop }); soundSection.Controls.Add(audio, 0, 1); layout.Controls.Add(soundSection, 0, 5);
+        var startup = new ToggleSwitch { Text = "Запускать с Windows", Width = 240, Checked = StartupService.IsEnabled(), Margin = new Padding(2, 13, 0, 0) };
+        bool updating = false;
+        startup.CheckedChanged += (_, _) => { if (updating) return; if (!StartupService.SetEnabled(startup.Checked)) { updating = true; startup.Checked = !startup.Checked; updating = false; MessageBox.Show(this, "Не удалось изменить автозапуск.", "The Alarm"); } };
+        layout.Controls.Add(startup, 0, 6); Controls.Add(layout); RefreshAlarms();
+    }
+    public void LoadAlarms(List<AlarmState> alarms) { _alarms.Clear(); _alarms.AddRange(alarms.Where(a => a != null).Select(a => a.Clone().Normalize())); RefreshAlarms(); }
+    public List<AlarmState> GetAlarms() => _alarms.Select(a => a.Clone().Normalize()).ToList();
+    public List<string> ConsumeDueAlarms()
+    {
+        var now = DateTime.UtcNow; var due = _alarms.Where(a => a.TimeUtc <= now).ToList();
+        foreach (var alarm in due)
+        {
+            if (!alarm.IsDaily) _alarms.Remove(alarm);
+            else
+            {
+                var local = now.ToLocalTime().Date.Add(alarm.TimeUtc.ToLocalTime().TimeOfDay);
+                if (local.ToUniversalTime() <= now) local = local.AddDays(1);
+                alarm.TimeUtc = local.ToUniversalTime();
+            }
+        }
+        if (due.Count > 0) { RefreshAlarms(); AlarmsChanged?.Invoke(this, EventArgs.Empty); }
+        return due.Select(a => a.Message).ToList();
+    }
+    private void RefreshAlarms()
+    {
+        _list.Items.Clear();
+        foreach (var a in _alarms) _list.Items.Add(new ListViewItem(new[] { a.TimeUtc.ToLocalTime().ToString("dd.MM.yyyy  HH:mm"), a.Message, a.IsDaily ? "Ежедневно" : "Один раз" }) { Tag = a });
+        _empty.Visible = _alarms.Count == 0; _list.Visible = !_empty.Visible;
+    }
 }

@@ -1,5 +1,11 @@
 # TheAlarm: Agent Prompts
 
+## Mandatory Override for All Prompts (2026-09-26)
+
+The later Selected Visual Direction section in IMPLEMENTATION_PLAN.md is authoritative: shadcn-inspired graphite/blue native UI, no legacy SettingsForm, startup in AlarmForm, all windows centered, independent action per corner and circular vertex controls. Do not restore the previous tray startup item or fixed upper/lower action mapping.
+
+Before working, read CONTEXT.md, IMPLEMENTATION_PLAN.md (especially Unified Macros Revision) and TASK_SPLIT.md. The latest plan supersedes older references below to two hidden windows and Ctrl+Alt+F2. Keep only MacroForm toggled with Ctrl+Alt+F1 when alarm/macros is visible; never open it via internal shortcuts from tray-only state. Corner actions belong to the built-in macro; user hotkey macros have independent process actions and optional scripts. Preserve shared encrypted storage and migration. Update the plan with actual implementation and test results, distinguishing verified behavior from pending manual acceptance. Update CONTEXT.md only after the user confirms acceptance. Agent C still owns the separate Pomodoro task; do not label it implemented by this UI revision.
+
 Этот файл содержит готовые промты для параллельной работы по проекту.
 Каждый промт обязан ссылаться на:
 
