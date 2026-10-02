@@ -9,7 +9,7 @@ internal static class AuditChecks
     private static void Check(bool value, string message) { if (!value) throw new InvalidOperationException(message); }
     public static void Run()
     {
-        ProcessRules(); StorageFailures(); MenuLifetime(); PickerSelection(); AlarmCatchup(); LayoutAlignment(); WindowResources(); IdleRuntime();
+        ProcessRules(); StorageFailures(); WindowBatchChecks.Run(); MenuLifetime(); PickerSelection(); AlarmCatchup(); LayoutAlignment(); WindowResources(); IdleRuntime();
         Check(!HotkeyText.TryParseKey("999999", out _) && !HotkeyText.TryParseKey("LWin", out _), "Invalid hotkey accepted");
         Console.WriteLine("PASS AUDIT: menu lifetime, corrupt/future config preservation, process names/arguments, picker selection, alarm catchup, key validation");
     }

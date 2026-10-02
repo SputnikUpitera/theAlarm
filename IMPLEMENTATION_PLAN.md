@@ -1,5 +1,11 @@
 # TheAlarm: Implementation Plan
 
+## Minimize Batch Latency Fix (2026-10-02)
+
+- Implemented: collect target PID set including unprotected descendants, enumerate desktop top-level windows once, skip already minimized/service windows, and dispatch deduplicated requests through ShowWindowAsync(SW_FORCEMINIMIZE). Removed sequential Process.Threads/EnumThreadWindows and synchronous ShowWindow from the action path. Close actions dispatch the same minimize batch before taskkill.
+- Regression verified: three test windows on separate UI threads, first UI thread intentionally blocked; all three requests queued in 4 ms and the other two minimized before the blocked thread was released. Full smoke suite also run. This measures dispatch and isolation, not guaranteed simultaneous animations or response of every third-party application.
+- Corner detection remains the shared 200 ms timer for all four corners. Pending user verification: the originally observed three-window scenario. Release 1.3.1 carries this fix to both portable architectures; CONTEXT.md records implemented behavior and the remaining user-verification gate. Build locations documented in BUILD_LOCATIONS.md.
+
 ## Screenshot Alignment Follow-up (2026-09-26)
 
 Implemented the six user screenshot corrections: vertically centered switch track/text and single-line input text; explicit Name and Function/trigger captions above the editor fields; editor enlarged to 960x880 with process panels consuming flexible remaining height and denser 28px minimum rows; removed outer window outline and caption separator; body/code font 10pt -> 12pt, card headings 13pt -> 15pt. Palette now follows the neutral dark shadcn theme (background #0a0a0a, surface #171717, foreground #fafafa, muted #a3a3a3), retaining blue primary accents. Table empty areas use the same surface as their rows. This is a native adaptation, not pixel-identical browser rendering. Geometry regression checks cover input centering, captions and panel expansion; final visual acceptance remains with the user. Existing menu-lifetime fixes retained.

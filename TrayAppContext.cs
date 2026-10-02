@@ -426,11 +426,11 @@ namespace TheAlarm
 							using (process)
 							{
 								var ids = target.ProtectChildren ? new HashSet<int> { process.Id } : GetProcessIdsWithDescendants(process.Id, descendants);
-								foreach (var id in ids)
-									if (prepared.Add(id)) TryMinimizeProcessWindows(id);
+								prepared.UnionWith(ids);
 							}
 						}
 					}
+					RequestMinimizeWindows(FindTargetWindows(prepared));
 					if (action == ProcessAction.Minimize) return;
 					foreach (var processName in processNames)
 					{
@@ -497,59 +497,27 @@ namespace TheAlarm
 			return info;
 		}
 
-		private static void EnumThreadWindowsForProcess(Process process, Func<IntPtr, bool> onWindow)
+		internal static List<IntPtr> FindTargetWindows(IReadOnlySet<int> processIds)
 		{
-			ProcessThread[] threads;
-			try
+			var windows = new List<IntPtr>();
+			if (processIds.Count == 0) return windows;
+			EnumWindows((hWnd, _) =>
 			{
-				threads = process.Threads.Cast<ProcessThread>().ToArray();
-			}
-			catch
-			{
-				return;
-			}
-
-			foreach (var thread in threads)
-			{
-				try
-				{
-					EnumThreadWindows((uint)thread.Id, (hWnd, _) =>
-					{
-						if (IsWindowVisible(hWnd))
-						{
-							return onWindow(hWnd);
-						}
-
-						return true;
-					}, IntPtr.Zero);
-				}
-				catch
-				{
-				}
-				finally { thread.Dispose(); }
-			}
+				GetWindowThreadProcessId(hWnd, out var processId);
+				if (processIds.Contains((int)processId) && IsWindowVisible(hWnd) && !IsIconic(hWnd) && ShouldAffectWindow(hWnd))
+					windows.Add(hWnd);
+				return true;
+			}, IntPtr.Zero);
+			return windows;
 		}
 
-		private static void TryMinimizeProcessWindows(int processId)
+		internal static int RequestMinimizeWindows(IEnumerable<IntPtr> windows)
 		{
-			try
-			{
-				using var process = Process.GetProcessById(processId);
-				EnumThreadWindowsForProcess(process, hWnd =>
-				{
-					if (!ShouldAffectWindow(hWnd))
-					{
-						return true;
-					}
-
-					// Force minimization without waiting for the target application's message loop.
-					ShowWindow(hWnd, SW_FORCEMINIMIZE);
-					return true;
-				});
-			}
-			catch
-			{
-			}
+			int requested = 0;
+			// Queue every request without waiting for another application's UI thread.
+			foreach (var hWnd in windows.Distinct())
+				if (ShowWindowAsync(hWnd, SW_FORCEMINIMIZE)) requested++;
+			return requested;
 		}
 
 		private static HashSet<int> GetProcessIdsWithDescendants(int rootProcessId, Dictionary<int, List<int>> childrenByParent)
@@ -654,16 +622,16 @@ namespace TheAlarm
 		private static extern bool GetCursorPos(out POINT lpPoint);
 
 		[DllImport("user32.dll")]
-		private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+		private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
 
 		[DllImport("user32.dll", SetLastError = true)]
-		private static extern IntPtr SendMessageTimeout(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam, uint flags, uint timeout, out IntPtr result);
+		private static extern bool IsIconic(IntPtr hWnd);
 
 		[DllImport("user32.dll")]
-		private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+		private static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
 
 		[DllImport("user32.dll", SetLastError = true)]
-		private static extern bool EnumThreadWindows(uint dwThreadId, EnumThreadDelegate lpfn, IntPtr lParam);
+		private static extern bool EnumWindows(EnumWindowDelegate lpfn, IntPtr lParam);
 
 		[DllImport("user32.dll")]
 		private static extern bool IsWindowVisible(IntPtr hWnd);
@@ -719,7 +687,7 @@ namespace TheAlarm
 			return true;
 		}
 
-		private delegate bool EnumThreadDelegate(IntPtr hWnd, IntPtr lParam);
+		private delegate bool EnumWindowDelegate(IntPtr hWnd, IntPtr lParam);
 
 		private const uint TH32CS_SNAPPROCESS = 0x00000002;
 		private static readonly IntPtr INVALID_HANDLE_VALUE = new IntPtr(-1);
